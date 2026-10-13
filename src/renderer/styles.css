@@ -1,0 +1,41 @@
+:root {
+  color-scheme: dark;
+  --bg: #111318;
+  --panel: #1a1d24;
+  --text: #e6e6e6;
+  --muted: #9aa0aa;
+  --ok: #2e9d5b;
+  --warn: #c98a1b;
+  --bad: #d0423a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px 20px; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
+header { display: flex; align-items: center; gap: 12px; }
+h1 { font-size: 18px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 8px; }
+h3 { font-size: 13px; margin: 18px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.pill { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--warn); color: #111; }
+.pill[data-level='readback-confirmed'] { background: #6fae84; }
+.pill[data-level='selftest-passed'] { background: var(--ok); color: #fff; }
+.pill[data-level='selftest-failed'], .pill[data-level='request-failed'], .pill[data-level='unsupported'], .pill[data-level='unprotected'] { background: var(--bad); color: #fff; }
+.detail { color: var(--muted); margin: 6px 0 12px; word-break: break-word; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+button { background: var(--panel); color: var(--text); border: 1px solid #333844; border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+button:hover:not(:disabled) { border-color: #59606e; }
+button:disabled { opacity: 0.5; cursor: progress; }
+.alert { min-height: 1.4em; margin: 10px 0; }
+.sensitive, .gate { background: var(--panel); border-radius: 8px; padding: 14px 16px; }
+.gate { border: 1px dashed var(--warn); }
+pre { margin: 0; padding: 10px; background: #0b0d11; border-radius: 6px; overflow-x: auto; }
+ul { margin: 0; padding-left: 18px; }
+.history li { font-family: ui-monospace, monospace; font-size: 12px; margin-bottom: 4px; }
+.v-pass { color: #7fd69d; }
+.v-fail { color: #ff8a80; }
+.v-inconclusive { color: #f0c36b; }
+.stale { opacity: 0.55; }
+.gaps li { color: var(--muted); margin-bottom: 4px; }
+/* The canary must be large and flat-coloured; nothing may be drawn over it. */
+.canary { display: flex; height: 160px; margin: 10px 0; }
+.canary .stripe { flex: 1 1 0; }
+body.control { padding: 12px; }
+.control-label { color: var(--warn); margin: 0 0 8px; }

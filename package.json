@@ -1,0 +1,25 @@
+{
+  "name": "inviterminal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Developer terminal that requests exclusion from screen capture and verifies the result",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "start": "npm run build && electron .",
+    "check": "npm run typecheck && npm test"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "electron": "^44.7.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.4"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}

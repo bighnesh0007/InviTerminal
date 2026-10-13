@@ -1,0 +1,1 @@
+([('0_{60d5dd0b-01cd-409e-a6a5-ba57a3bd26af}', 'fixture-6f3a91', 'wayland', 100, 0.80000000000000004, {'subtext': <'Activate running window on Desktop 3'>})],)

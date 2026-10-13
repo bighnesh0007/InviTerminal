@@ -2,6 +2,7 @@ import { cssColor, type CanarySequence } from '../shared/canary';
 import { findCanary } from '../shared/detect-canary';
 import type { RendererApi, ScreencastReport } from '../shared/ipc';
 import { contentMayShow, type ProtectionLevel, type ProtectionState, type SelfTestRecord } from '../shared/protection';
+import { mountTerminal } from './terminal';
 
 declare global {
   interface Window {
@@ -19,6 +20,8 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: { className?: 
   node.append(...children);
   return node;
 }
+
+const alertLine = el('p', { className: 'alert' });
 
 function button(text: string, onClick: () => Promise<unknown> | void): HTMLButtonElement {
   const b = el('button', { text });
@@ -54,8 +57,6 @@ function showCanary(seq: CanarySequence | null): void {
 }
 api.onCanary(showCanary);
 
-const alertLine = el('p', { className: 'alert' });
-
 if (role === 'control') {
   document.title = 'control';
   document.body.classList.add('control');
@@ -70,12 +71,13 @@ if (role === 'control') {
 // ---- main window --------------------------------------------------------------
 
 function renderMain(): void {
+  document.body.classList.add('main');
   const LEVEL_TEXT: Record<ProtectionLevel, string> = {
     unsupported: 'Unsupported here',
     unprotected: 'Not protected',
     'request-failed': 'Request failed',
     requested: 'Requested (not confirmed)',
-    'readback-confirmed': 'Compositor reports excluded (pixels not yet tested)',
+    'readback-confirmed': 'Excluded per compositor (pixels not tested)',
     'selftest-passed': 'Self-test passed (tested paths only)',
     'selftest-failed': 'SELF-TEST FAILED — content was captured',
   };
@@ -84,30 +86,48 @@ function renderMain(): void {
   const detail = el('p', { className: 'detail' });
   const history = el('ul', { className: 'history' });
   const gaps = el('ul', { className: 'gaps' });
-  const sensitive = el(
-    'div',
-    { className: 'sensitive' },
-    el('h2', { text: 'Protected content area' }),
-    el('p', { text: 'The terminal and snippet library will live here (Phase 2). For now this stands in for anything you would not want on a shared screen.' }),
-    el('pre', { text: '$ export API_TOKEN=example-not-a-real-secret\n$ ./deploy.sh --env staging' }),
-  );
-  const gate = el('div', { className: 'gate' }, el('p', { text: 'Content hidden until the compositor confirms this window is excluded from capture.' }));
+
+  const termHost = el('div', { className: 'term-host' });
+  const gate = el('div', { className: 'gate' }, el('p', { text: 'Terminal hidden until the compositor confirms this window is excluded from capture. Keystrokes are not sent to the shell meanwhile.' }));
+  const termWrap = el('main', { className: 'term-wrap' }, termHost, gate, canary);
+
+  const drawer = el('section', { className: 'drawer' });
+  drawer.hidden = true;
+  const drawerToggle = button('Protection ▾', () => {
+    drawer.hidden = !drawer.hidden;
+    drawerToggle.textContent = drawer.hidden ? 'Protection ▾' : 'Protection ▴';
+  });
+
+  let state: ProtectionState | null = null;
   let override = false;
+  const inputAllowed = () => override || (state !== null && contentMayShow(state.level));
+
+  const view = mountTerminal(termHost, api, inputAllowed, () => {
+    gate.classList.remove('pulse');
+    void gate.offsetWidth; // restart the animation
+    gate.classList.add('pulse');
+  });
+
   gate.append(
     button('Show anyway', () => {
       override = true;
-      void api.getState().then(render);
+      if (state) render(state);
     }),
   );
 
   function render(s: ProtectionState): void {
+    state = s;
     pill.textContent = LEVEL_TEXT[s.level];
     pill.dataset.level = s.level;
     detail.textContent = s.detail;
     if (s.level === 'selftest-failed') override = false;
-    const show = contentMayShow(s.level) || override;
-    sensitive.hidden = !show;
+    const show = inputAllowed();
+    const wasHidden = !gate.hidden;
     gate.hidden = show;
+    termHost.classList.toggle('concealed', !show);
+    if (show && wasHidden) view.focus();
+    // Problems should not hide behind a collapsed drawer.
+    if ((s.level === 'unsupported' || s.level === 'selftest-failed' || s.level === 'request-failed') && drawer.hidden) drawerToggle.click();
 
     gaps.replaceChildren(...s.knownGaps.map((g) => el('li', { text: g })));
     history.replaceChildren(
@@ -131,14 +151,14 @@ function renderMain(): void {
       await video.play();
       // The first frames from PipeWire can be blank or stale.
       await new Promise((r) => setTimeout(r, 1000));
-      const canvas = el('canvas');
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const c = el('canvas');
+      const ctx = c.getContext('2d', { willReadFrequently: true });
       if (!ctx) throw new Error('2D canvas unavailable');
       for (let i = 0; i < 5; i++) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        c.width = video.videoWidth;
+        c.height = video.videoHeight;
         ctx.drawImage(video, 0, 0);
-        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const img = ctx.getImageData(0, 0, c.width, c.height);
         const frame = { data: img.data, width: img.width, height: img.height, order: 'rgba' as const };
         report.protectedFound ||= findCanary(frame, protectedSeq).found;
         report.controlFound ||= findCanary(frame, controlSeq).found;
@@ -156,13 +176,7 @@ function renderMain(): void {
     alertLine.textContent = `Screen-share self-test: ${rec.verdict.toUpperCase()} — ${rec.reason}`;
   }
 
-  document.body.append(
-    el(
-      'header',
-      {},
-      el('h1', { text: 'InviTerminal' }),
-      pill,
-    ),
+  drawer.append(
     detail,
     el(
       'div',
@@ -178,14 +192,16 @@ function renderMain(): void {
       button('Self-test: screen share (portal)', screencastSelfTest),
     ),
     alertLine,
-    canary,
-    gate,
-    sensitive,
     el('h3', { text: 'Self-test history' }),
     history,
     el('h3', { text: 'Known gaps on this platform' }),
     gaps,
   );
+
+  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), drawerToggle), drawer, termWrap);
+
+  // The drawer changes the terminal's height.
+  new ResizeObserver(() => view.fit()).observe(drawer);
 
   api.onState(render);
   void api.getState().then(render);

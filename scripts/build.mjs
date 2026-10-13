@@ -7,7 +7,7 @@ const common = { bundle: true, sourcemap: 'linked', logLevel: 'info', target: 'e
 
 await rm('dist', { recursive: true, force: true });
 await Promise.all([
-  build({ ...common, entryPoints: ['src/main/index.ts'], outfile: 'dist/main/index.js', platform: 'node', format: 'cjs', external: ['electron'] }),
+  build({ ...common, entryPoints: ['src/main/index.ts'], outfile: 'dist/main/index.js', platform: 'node', format: 'cjs', external: ['electron', 'node-pty'] }),
   // Sandboxed preloads cannot require() local files, so it must be one self-contained file.
   build({ ...common, entryPoints: ['src/preload/index.ts'], outfile: 'dist/preload/index.js', platform: 'node', format: 'cjs', external: ['electron'] }),
   build({ ...common, entryPoints: ['src/renderer/main.ts'], outfile: 'dist/renderer/main.js', platform: 'browser', format: 'iife' }),
@@ -15,3 +15,4 @@ await Promise.all([
 await mkdir('dist/renderer', { recursive: true });
 await cp('src/renderer/index.html', 'dist/renderer/index.html');
 await cp('src/renderer/styles.css', 'dist/renderer/styles.css');
+await cp('node_modules/@xterm/xterm/css/xterm.css', 'dist/renderer/xterm.css');

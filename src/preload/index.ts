@@ -19,6 +19,25 @@ const api: RendererApi = {
     ipcRenderer.on(IPC.canary, (_e, seq: CanarySequence | null) => cb(seq));
   },
   canaryPainted: () => ipcRenderer.send(IPC.canaryPainted),
+
+  terminal: {
+    profiles: () => ipcRenderer.invoke(IPC.termProfiles),
+    spawn: (profileId) => ipcRenderer.invoke(IPC.termSpawn, profileId === undefined ? {} : { profileId }),
+    input: (sessionId, data) => ipcRenderer.send(IPC.termInput, { sessionId, data }),
+    resize: (sessionId, cols, rows) => ipcRenderer.send(IPC.termResize, { sessionId, cols, rows }),
+    ack: (sessionId, chars) => ipcRenderer.send(IPC.termAck, { sessionId, chars }),
+    kill: (sessionId) => ipcRenderer.send(IPC.termKill, { sessionId }),
+    onData: (cb) => {
+      ipcRenderer.on(IPC.termData, (_e, sessionId: string, data: string) => cb(sessionId, data));
+    },
+    onExit: (cb) => {
+      ipcRenderer.on(IPC.termExit, (_e, sessionId: string, exitCode: number, signal: number | null) => cb(sessionId, exitCode, signal));
+    },
+  },
+  clipboard: {
+    read: () => ipcRenderer.invoke(IPC.clipboardRead),
+    write: (text) => ipcRenderer.invoke(IPC.clipboardWrite, { text }),
+  },
 };
 
 contextBridge.exposeInMainWorld('inviterminal', api);

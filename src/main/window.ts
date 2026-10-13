@@ -1,4 +1,4 @@
-import { BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 
 export type WindowRole = 'main' | 'control';
@@ -35,6 +35,13 @@ export function createWindow(role: WindowRole, opts: { title: string; width: num
     if (url.startsWith('https://')) void shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  if (!app.isPackaged) {
+    // Surfaces renderer errors (CSP violations especially) in the dev console.
+    win.webContents.on('console-message', (details) => {
+      if (details.level === 'warning' || details.level === 'error') console.log(`[renderer:${role}:${details.level}] ${details.message}`);
+    });
+  }
 
   void win.loadFile(path.join(__dirname, '../renderer/index.html'), { query: { role } });
   win.once('ready-to-show', () => win.show());

@@ -1,12 +1,21 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, type IpcMainInvokeEvent, powerMonitor, screen, session } from 'electron';
+import { app, type BrowserWindow, desktopCapturer, ipcMain, type IpcMainInvokeEvent, powerMonitor, screen, session } from 'electron';
+import * as nodePty from 'node-pty';
+import { accessSync, constants, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
+import { captureAutotest, createTerminalTap, terminalAutotest, uiSnapshotAutotest } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
 import { createUnsupportedProvider } from './capture/providers/unsupported';
 import { SelfTestRunner } from './capture/selftest/SelfTestRunner';
-import { config, sessionEnv } from './config';
+import { config, sessionEnv, shellParentEnv } from './config';
+import { isFromWindow } from './ipc-guard';
+import { buildChildEnv } from './terminal/env';
+import { PtyManager } from './terminal/PtyManager';
+import { registerTerminalIpc } from './terminal/register';
+import { detectShellProfiles } from './terminal/shells';
 import { createWindow } from './window';
 
 const ScreencastReportSchema = z
@@ -50,23 +59,64 @@ function hardenSession(): void {
   });
 }
 
-/** Only the main window's own page may drive protection and self-tests. */
-function fromMain(e: IpcMainInvokeEvent): boolean {
-  return mainWin !== null && e.sender === mainWin.webContents && (e.senderFrame?.url ?? '').startsWith('file://');
-}
-
 function guard<A extends unknown[], R>(fn: (...args: A) => R) {
   return (e: IpcMainInvokeEvent, ...args: A): R => {
-    if (!fromMain(e)) throw new Error('IPC from unexpected sender');
+    if (!isFromWindow(e, mainWin)) throw new Error('IPC from unexpected sender');
     return fn(...args);
   };
 }
 
+function createPtyManager(tap: ReturnType<typeof createTerminalTap> | null): PtyManager {
+  let etcShells = '';
+  try {
+    etcShells = readFileSync('/etc/shells', 'utf8');
+  } catch {
+    // Handled below: detection falls back to $SHELL, or throws if nothing is usable.
+  }
+  const profiles = detectShellProfiles({
+    etcShells,
+    userShell: sessionEnv.SHELL,
+    isExecutable: (p) => {
+      try {
+        accessSync(p, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    realpath: (p) => realpathSync(p),
+  });
+  return new PtyManager((file, args, opts) => nodePty.spawn(file, args, opts), profiles, () => buildChildEnv(shellParentEnv(), app.getVersion()), homedir(), {
+    data: (sessionId, data) => {
+      tap?.output.set(sessionId, [...(tap.output.get(sessionId) ?? []), data]);
+      if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.termData, sessionId, data);
+    },
+    exit: (sessionId, exitCode, signal) => {
+      tap?.exits.set(sessionId, exitCode);
+      if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.termExit, sessionId, exitCode, signal ?? null);
+    },
+  });
+}
+
 app.whenReady().then(() => {
   hardenSession();
+  // Autotests type into a real shell and take screenshots: development builds only.
+  const autotest = app.isPackaged ? 'off' : config.autotest;
 
   const env = classifyEnvironment(process.platform, sessionEnv);
   const provider = env.kind === 'kwin-wayland' ? createKwinProvider() : createUnsupportedProvider(env.reason);
+
+  const tap = autotest === 'terminal' || autotest === 'ui-snapshot' ? createTerminalTap() : null;
+  const manager = createPtyManager(tap);
+  if (tap) {
+    const spawn = manager.spawn.bind(manager);
+    manager.spawn = (profileId) => {
+      const info = spawn(profileId);
+      tap.spawned.push({ sessionId: info.sessionId, pid: info.pid });
+      return info;
+    };
+  }
+  registerTerminalIpc(() => mainWin, manager);
 
   const win = createWindow('main', { title: config.mainTitle, width: 980, height: 680 });
   mainWin = win;
@@ -80,7 +130,12 @@ app.whenReady().then(() => {
   let first = true;
   win.on('show', () => {
     const done = first ? controller.initialise() : controller.protect();
-    if (first && config.autotest === 'screenshot') void done.then(() => autotest(controller, r));
+    if (first && autotest === 'screenshot') void done.then(() => captureAutotest(win, controller, r));
+    if (first && tap && autotest === 'terminal') void done.then(() => terminalAutotest(win, manager, tap));
+    if (first && tap && autotest === 'ui-snapshot' && config.snapshotPath) {
+      const out = config.snapshotPath;
+      void done.then(() => uiSnapshotAutotest(win, manager, tap, out, controller));
+    }
     first = false;
   });
 
@@ -94,8 +149,11 @@ app.whenReady().then(() => {
   powerMonitor.on('unlock-screen', recheck);
   win.on('closed', () => {
     clearInterval(interval);
+    // No shell may outlive the window it was typed into.
+    manager.killAll();
     mainWin = null;
   });
+  app.on('before-quit', () => manager.killAll());
 
   ipcMain.handle(IPC.getState, guard(() => controller.get()));
   ipcMain.handle(IPC.protect, guard(() => controller.protect()));
@@ -120,41 +178,5 @@ app.whenReady().then(() => {
     }),
   );
 });
-
-/**
- * Runs the screenshot self-test unprotected first: it must FAIL, or the
- * detector is not seeing real captures and a later PASS would mean nothing.
- */
-async function autotest(controller: ProtectionController, r: SelfTestRunner): Promise<void> {
-  const log = (event: string, data: unknown) => console.log(`[autotest] ${JSON.stringify({ event, ...(data as object) })}`);
-  log('start', { level: controller.get().level, detail: controller.get().detail });
-  await controller.unprotect();
-  log('unprotected', { level: controller.get().level, detail: controller.get().detail });
-  log('negative-control', await r.screenshot());
-  await controller.protect();
-  log('protected', { level: controller.get().level, detail: controller.get().detail });
-  const rec = await r.screenshot();
-  controller.recordSelfTest(rec);
-  log('protected-test', rec);
-
-  // Hide/show unmaps the Wayland surface; check what KWin does with the flag and that re-apply restores it.
-  const win = BrowserWindow.getAllWindows().find((w) => w.getTitle() === config.mainTitle);
-  if (win) {
-    win.hide();
-    await new Promise((res) => setTimeout(res, 800));
-    await controller.recheck();
-    log('after-hide', { level: controller.get().level, detail: controller.get().detail });
-    const shown = new Promise<void>((res) => win.once('show', () => res()));
-    win.show();
-    await shown;
-    await new Promise((res) => setTimeout(res, 2500));
-    log('after-show', { level: controller.get().level, detail: controller.get().detail });
-    const rec2 = await r.screenshot();
-    controller.recordSelfTest(rec2);
-    log('after-show-test', rec2);
-  }
-  log('final', { level: controller.get().level });
-  app.quit();
-}
 
 app.on('window-all-closed', () => app.quit());

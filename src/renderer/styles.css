@@ -1,6 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #111318;
+  --term-bg: #0b0d11;
   --panel: #1a1d24;
   --text: #e6e6e6;
   --muted: #9aa0aa;
@@ -9,24 +10,27 @@
   --bad: #d0423a;
 }
 * { box-sizing: border-box; }
-body { margin: 0; padding: 16px 20px; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
-header { display: flex; align-items: center; gap: 12px; }
-h1 { font-size: 18px; margin: 0; }
-h2 { font-size: 15px; margin: 0 0 8px; }
-h3 { font-size: 13px; margin: 18px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
-.pill { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--warn); color: #111; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
+body.main { display: flex; flex-direction: column; overflow: hidden; }
+
+.bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid #23262e; flex: none; }
+.bar h1 { font-size: 14px; margin: 0; font-weight: 600; }
+.spacer { flex: 1; }
+h3 { font-size: 12px; margin: 14px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--warn); color: #111; }
 .pill[data-level='readback-confirmed'] { background: #6fae84; }
 .pill[data-level='selftest-passed'] { background: var(--ok); color: #fff; }
 .pill[data-level='selftest-failed'], .pill[data-level='request-failed'], .pill[data-level='unsupported'], .pill[data-level='unprotected'] { background: var(--bad); color: #fff; }
-.detail { color: var(--muted); margin: 6px 0 12px; word-break: break-word; }
+
+.drawer { flex: none; max-height: 45vh; overflow-y: auto; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid #23262e; }
+.detail { color: var(--muted); margin: 0 0 10px; word-break: break-word; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-button { background: var(--panel); color: var(--text); border: 1px solid #333844; border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
+button { background: var(--bg); color: var(--text); border: 1px solid #333844; border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; }
 button:hover:not(:disabled) { border-color: #59606e; }
 button:disabled { opacity: 0.5; cursor: progress; }
-.alert { min-height: 1.4em; margin: 10px 0; }
-.sensitive, .gate { background: var(--panel); border-radius: 8px; padding: 14px 16px; }
-.gate { border: 1px dashed var(--warn); }
-pre { margin: 0; padding: 10px; background: #0b0d11; border-radius: 6px; overflow-x: auto; }
+.alert { min-height: 1.4em; margin: 8px 0 0; }
 ul { margin: 0; padding-left: 18px; }
 .history li { font-family: ui-monospace, monospace; font-size: 12px; margin-bottom: 4px; }
 .v-pass { color: #7fd69d; }
@@ -34,8 +38,20 @@ ul { margin: 0; padding-left: 18px; }
 .v-inconclusive { color: #f0c36b; }
 .stale { opacity: 0.55; }
 .gaps li { color: var(--muted); margin-bottom: 4px; }
-/* The canary must be large and flat-coloured; nothing may be drawn over it. */
-.canary { display: flex; height: 160px; margin: 10px 0; }
+
+.term-wrap { position: relative; flex: 1; min-height: 0; background: var(--term-bg); }
+.term-host { position: absolute; inset: 6px 4px 4px 10px; }
+/* Concealed, not display:none — xterm.js needs a measured box to keep its grid size. */
+.term-host.concealed { visibility: hidden; }
+.gate { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; background: var(--term-bg); color: var(--muted); }
+.gate[hidden] { display: none; }
+.gate.pulse { animation: pulse 0.6s; }
+@keyframes pulse { 0% { background: #3a2a10; } 100% { background: var(--term-bg); } }
+
+/* The canary sits above the terminal and the gate; nothing may be drawn over it. */
+.canary { display: flex; height: 160px; }
+.term-wrap .canary { position: absolute; top: 0; left: 0; right: 0; z-index: 10; }
+.canary[hidden] { display: none; }
 .canary .stripe { flex: 1 1 0; }
 body.control { padding: 12px; }
 .control-label { color: var(--warn); margin: 0 0 8px; }

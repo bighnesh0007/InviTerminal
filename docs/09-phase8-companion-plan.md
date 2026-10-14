@@ -1,6 +1,6 @@
 ---
 type: decision-record
-status: proposed — awaiting the decisions in §7 before any implementation
+status: 8a–8c built and verified headlessly (server + Share panel + explanation push). Real phone scan is the user's check. 8d (meeting summaries) deferred.
 verified-on: 2026-10-14
 ---
 
@@ -112,6 +112,30 @@ expected and documented.
 | **8d** | **Meeting summary** push: record (consent) → local transcribe → Groq summary → phone | A consented recording produces a summary on the phone |
 
 **MVP = 8a–8c.** 8d builds on the deferred notes work.
+
+## Done (2026-10-14): 8a–8c
+
+Decisions (§7): add `ws`+`qrcode`+`selfsigned` (external to the bundle); separate mobile
+page; server-security-first; document the Windows firewall prompt.
+
+- **8a** `companion/{cert,pairing,Server}.ts`: LAN HTTPS + WSS, per-session self-signed EC
+  cert (SHA-256 fingerprint), one-time token offered as a WS **subprotocol** (not a URL
+  param), Origin-checked, serves one strict-CSP mobile page. Imports nothing from
+  terminal/library/key code.
+- **8b** `companion/controller.ts` + Share panel: Start/Stop, QR (generated in main, so
+  `qrcode` stays out of the renderer bundle), cert fingerprint, live paired-device count, a
+  header **"📱 Sharing"** badge + tray item. Behind the gate, so the token-bearing QR is
+  never on a shared screen.
+- **8c** explanations are pushed to paired phones (the explain `onResult` → `companion.push`).
+
+Verified: 10 server tests (token auth, **TLS enforced** — plaintext ws:// and untrusted-cert
+both refused, push, clean stop, HTTPS page with strict CSP), no-token mutation caught; 197
+tests total; `npm audit --omit=dev` 0; capture regression passes. **Live
+(`INVI_AUTOTEST=companion`, real LAN IP 172.16.5.45):** Start → running with a PNG QR and a
+valid fingerprint; a real `ws` client paired with the token over TLS (app saw 1 device); an
+explanation (stub) was **pushed and received** by the client; Stop closed it. Screenshot in
+`docs/`. **Not verified:** an actual phone scanning the QR (yours to do); **8d** (consent-based
+meeting summaries → phone) is deferred with the notes work.
 
 ## 7. Decisions needed from you
 

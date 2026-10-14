@@ -33,6 +33,9 @@ newline, so nothing runs until you press Enter.
   while live; whisper.cpp transcribes **on your machine** and the audio is deleted (never uploaded).
 - **Interview practice** — the model asks questions, you answer aloud (local transcription) or
   by typing, and it gives feedback.
+- **Share to phone** (Share button) — opens a one-time, TLS-encrypted link on your LAN; scan
+  the QR with your phone (same WiFi) and terminal explanations are pushed to its browser.
+  Off by default, LAN-only (never the internet), with a persistent "📱 Sharing" indicator.
 
 Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 [Phase 3](docs/04-phase3-visibility-results.md) ·

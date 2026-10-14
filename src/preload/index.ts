@@ -4,6 +4,7 @@ import { type ConcealRequest, IPC, type RendererApi, type ScreencastReport } fro
 import type { ProtectionState } from '../shared/protection';
 import type { AiStatus } from '../shared/ai';
 import type { AudioStatus } from '../shared/audio';
+import type { CompanionStatus } from '../shared/companion';
 import type { SettingsView } from '../shared/settings';
 import type { LibraryStatus } from '../shared/snippet';
 
@@ -110,6 +111,14 @@ const api: RendererApi = {
   stt: {
     status: () => ipcRenderer.invoke(IPC.sttStatus),
     transcribe: (wav) => ipcRenderer.invoke(IPC.sttTranscribe, { wav }),
+  },
+  companion: {
+    status: () => ipcRenderer.invoke(IPC.companionStatus),
+    onStatus: (cb) => {
+      ipcRenderer.on(IPC.companionStatusChanged, (_e, s: CompanionStatus) => cb(s));
+    },
+    start: () => ipcRenderer.invoke(IPC.companionStart),
+    stop: () => ipcRenderer.invoke(IPC.companionStop),
   },
   practice: {
     start: (topic) => ipcRenderer.invoke(IPC.practiceStart, { topic }),

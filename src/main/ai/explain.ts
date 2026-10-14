@@ -40,7 +40,7 @@ function clampLines(text: string): { text: string; truncated: boolean } {
  * trusting the renderer) and captures the image itself. Nothing is sent until
  * the renderer calls start — the renderer shows a confirm-preview first.
  */
-export function registerExplainIpc(getWin: () => BrowserWindow | null, streamer: ExplainStreamer, getModel: () => AiModel): void {
+export function registerExplainIpc(getWin: () => BrowserWindow | null, streamer: ExplainStreamer, getModel: () => AiModel, onResult: (text: string) => void = () => {}): void {
   let active: AbortController | null = null;
 
   const send = (channel: string, ...args: unknown[]) => {
@@ -78,6 +78,7 @@ export function registerExplainIpc(getWin: () => BrowserWindow | null, streamer:
       try {
         const full = await streamer({ model: getModel(), system: EXPLAIN_SYSTEM, text, ...(imageBase64 ? { imageBase64 } : {}) }, (chunk) => send(IPC.aiExplainDelta, chunk), controller.signal);
         send(IPC.aiExplainDone, full);
+        onResult(full);
       } catch (err) {
         send(controller.signal.aborted ? IPC.aiExplainCancelled : IPC.aiExplainError, (err as Error).message);
       } finally {

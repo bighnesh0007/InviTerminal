@@ -835,3 +835,60 @@ export async function practiceAutotest(win: BrowserWindow, controller: Protectio
   }
   win.close();
 }
+
+/** Phase 8b/8c: start sharing via the UI, pair a real WS client, and confirm an explanation is pushed. */
+export async function companionAutotest(win: BrowserWindow, companion: { currentUrl(): string | null }): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  const clickIn = (scope: string, text: string) =>
+    js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
+  const { WebSocket } = await import('ws');
+  let ws: { close(): void } | null = null;
+  const waitFor = async (pred: () => Promise<boolean>, ms = 10_000): Promise<boolean> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (await pred()) return true;
+      await sleep(80);
+    }
+    return false;
+  };
+  try {
+    await until('renderer', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
+    await clickIn('header', 'Share');
+    await sleep(200);
+    await clickIn('.companion-panel', 'Start sharing');
+    await waitFor(() => js<boolean>(`window.inviterminal.companion.status().then(s => s.running)`), 8000);
+    const st = await js<{ running: boolean; host: string; port: number; clients: number; fingerprint: string; qrDataUrl: string }>(`window.inviterminal.companion.status()`);
+    log('started', { running: st.running, host: st.host, port: st.port, qrIsPng: (st.qrDataUrl ?? '').startsWith('data:image/png'), fingerprintOk: /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/.test(st.fingerprint) });
+
+    const url = companion.currentUrl()!; // main-only; carries the token
+    const token = url.split('#t=')[1]!;
+    const wssUrl = `wss://${st.host}:${st.port}/`;
+    const socket = new WebSocket(wssUrl, ['inviterminal', token], { rejectUnauthorized: false });
+    ws = socket;
+    const explanationGot = new Promise<Record<string, unknown>>((resolve) => {
+      socket.on('message', (d) => {
+        const m = JSON.parse(d.toString());
+        if (m.type === 'explanation') resolve(m);
+      });
+    });
+    await new Promise<void>((r) => socket.on('open', () => r()));
+    await sleep(300);
+    const afterPair = await js<number>(`window.inviterminal.companion.status().then(s => s.clients)`);
+    log('paired', { clientsSeenByApp: afterPair });
+
+    // Run an explanation (stub model) — its result should be pushed to the paired client.
+    await js(`window.inviterminal.ai.setKey('gsk_fakeCompanionAutotest0123456789abc')`);
+    await js(`window.inviterminal.ai.explain({ text: 'bash: foo: command not found', redact: true, wantImage: false })`);
+    const msg = await Promise.race([explanationGot, sleep(8000).then(() => null)]);
+    log('explanation-pushed', { received: msg !== null, title: msg?.title, textHasStub: typeof msg?.text === 'string' && (msg.text as string).includes('[stub') });
+    if (process.env.INVI_SNAPSHOT_PATH) await writeFile(process.env.INVI_SNAPSHOT_PATH, (await win.webContents.capturePage()).toPNG());
+
+    await clickIn('.companion-panel', 'Stop sharing');
+    await waitFor(() => js<boolean>(`window.inviterminal.companion.status().then(s => !s.running)`), 5000);
+    log('stopped', { running: await js<boolean>(`window.inviterminal.companion.status().then(s => s.running)`) });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  ws?.close();
+  win.close();
+}

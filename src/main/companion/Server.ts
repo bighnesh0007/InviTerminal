@@ -58,6 +58,9 @@ export class CompanionServer {
   private token: string | null = null;
   private origin = '';
 
+  /** @param onClients fired with the live paired-client count on connect/disconnect. */
+  constructor(private readonly onClients: (count: number) => void = () => {}) {}
+
   get isRunning(): boolean {
     return this.https !== null;
   }
@@ -75,7 +78,11 @@ export class CompanionServer {
 
     const server = createServer({ key, cert }, (req, res) => this.serve(req, res, fingerprint256));
     this.wss = new WebSocketServer({ server, verifyClient: (info, cb) => this.verify(info.origin, info.req.headers['sec-websocket-protocol'], cb) });
-    this.wss.on('connection', (ws) => ws.send(JSON.stringify({ type: 'hello' } satisfies PushMessage)));
+    this.wss.on('connection', (ws) => {
+      ws.send(JSON.stringify({ type: 'hello' } satisfies PushMessage));
+      this.onClients(this.clientCount);
+      ws.on('close', () => this.onClients(this.clientCount));
+    });
 
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);

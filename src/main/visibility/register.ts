@@ -38,6 +38,8 @@ export interface VisibilityWiring {
   handleArgv(argv: readonly string[]): void;
   /** Updates the tray tooltip/menu to reflect a live mic recording (persistent indicator). */
   setRecording(status: AudioStatus, onStop: () => void): void;
+  /** Updates the tray to reflect active phone sharing (persistent indicator). */
+  setSharing(active: boolean, clients: number, onStop: () => void): void;
 }
 
 export function registerVisibility(win: BrowserWindow): VisibilityWiring {
@@ -59,16 +61,24 @@ export function registerVisibility(win: BrowserWindow): VisibilityWiring {
   });
 
   let tray: Tray | null = null;
-  const refreshTray = (rec?: { status: AudioStatus; onStop: () => void }) => {
+  let recState: { status: AudioStatus; onStop: () => void } | null = null;
+  let shareState: { clients: number; onStop: () => void } | null = null;
+  const refreshTray = () => {
     if (!tray) return;
-    const recording = rec?.status.active ?? false;
-    // The indicator is deliberately visible in a shared screen — the point is that recording is never hidden.
-    tray.setToolTip(recording ? `InviTerminal — ● recording (${AUDIO_KIND_LABEL[rec!.status.kind!]})` : 'InviTerminal');
+    const recording = recState?.status.active ?? false;
+    const sharing = shareState !== null;
+    // Deliberately visible in a shared screen — recording/sharing is never hidden.
+    const bits = ['InviTerminal'];
+    if (recording) bits.push(`● recording (${AUDIO_KIND_LABEL[recState!.status.kind!]})`);
+    if (sharing) bits.push(`📱 sharing (${shareState!.clients})`);
+    tray.setToolTip(bits.join(' — '));
     const items: Electron.MenuItemConstructorOptions[] = [
       { label: 'Show / Hide', click: () => void controller.toggle() },
       { label: 'Hide now', click: () => void controller.hide('panic') },
     ];
-    if (recording) items.push({ type: 'separator' }, { label: '● Stop recording', click: () => rec!.onStop() });
+    if (recording || sharing) items.push({ type: 'separator' });
+    if (recording) items.push({ label: '● Stop recording', click: () => recState!.onStop() });
+    if (sharing) items.push({ label: '📱 Stop sharing', click: () => shareState!.onStop() });
     items.push({ type: 'separator' }, { label: 'Quit', click: () => app.quit() });
     tray.setContextMenu(Menu.buildFromTemplate(items));
   };
@@ -81,5 +91,17 @@ export function registerVisibility(win: BrowserWindow): VisibilityWiring {
     console.warn(`Tray unavailable: ${(e as Error).message}`);
   }
 
-  return { controller, tray, handleArgv, setRecording: (status, onStop) => refreshTray(status.active ? { status, onStop } : undefined) };
+  return {
+    controller,
+    tray,
+    handleArgv,
+    setRecording: (status, onStop) => {
+      recState = status.active ? { status, onStop } : null;
+      refreshTray();
+    },
+    setSharing: (active, clients, onStop) => {
+      shareState = active ? { clients, onStop } : null;
+      refreshTray();
+    },
+  };
 }

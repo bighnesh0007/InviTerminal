@@ -2,6 +2,7 @@ import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
 import type { AiStatus } from './ai';
 import type { AudioKind, AudioStatus, SttStatus } from './audio';
+import type { CompanionStatus } from './companion';
 import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
 
@@ -86,6 +87,11 @@ export const IPC = {
   practiceTurn: 'practice:turn',
   /** main → renderer */
   practiceError: 'practice:error',
+  companionStart: 'companion:start',
+  companionStop: 'companion:stop',
+  companionStatus: 'companion:status',
+  /** main → renderer */
+  companionStatusChanged: 'companion:status-changed',
 } as const;
 
 export interface ConcealRequest {
@@ -199,6 +205,13 @@ export interface RendererApi {
     status(): Promise<SttStatus>;
     /** Transcribe 16 kHz mono WAV bytes locally. */
     transcribe(wav: Uint8Array): Promise<{ text: string; ms: number }>;
+  };
+  companion: {
+    status(): Promise<CompanionStatus>;
+    onStatus(cb: (s: CompanionStatus) => void): void;
+    /** Starts sharing; returns the status (with QR + fingerprint), or throws with a reason. */
+    start(): Promise<CompanionStatus>;
+    stop(): Promise<void>;
   };
   practice: {
     start(topic: string): Promise<void>;

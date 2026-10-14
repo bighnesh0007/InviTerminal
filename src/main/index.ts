@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { aiExplainAutotest, aiKeyAutotest, captureAutotest, micGateAutotest, practiceAutotest, sttAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { aiExplainAutotest, aiKeyAutotest, captureAutotest, companionAutotest, micGateAutotest, practiceAutotest, sttAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -30,6 +30,7 @@ import { GroqClient } from './ai/GroqClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
 import { type ExplainStreamer, registerExplainIpc } from './ai/explain';
+import { CompanionController } from './companion/controller';
 import { type ChatStreamer, registerPracticeIpc } from './ai/practice';
 import { LibraryService } from './library/LibraryService';
 import { registerLibraryIpc } from './library/register';
@@ -201,8 +202,17 @@ app.whenReady().then(async () => {
   const groq = new GroqClient(() => keyStore.getKey());
   registerAiIpc(() => mainWin, keyStore, groq, () => settings.effective().ai.model);
   // Autotests stub the model so the explain flow is verifiable without a key or network.
+  const companion = new CompanionController((st) => {
+    if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.companionStatusChanged, st);
+    visibility.setSharing(st.running, st.clients, () => void companion.stop());
+  });
+  ipcMain.handle(IPC.companionStatus, guard(() => companion.status()));
+  ipcMain.handle(IPC.companionStart, guard(() => companion.start()));
+  ipcMain.handle(IPC.companionStop, guard(() => companion.stop()));
+  app.on('before-quit', () => void companion.stop());
+
   const explainStreamer: ExplainStreamer = autotest !== 'off' ? stubExplainStreamer : (opts, onDelta, signal) => groq.explainStream(opts, onDelta, signal);
-  registerExplainIpc(() => mainWin, explainStreamer, () => settings.effective().ai.model);
+  registerExplainIpc(() => mainWin, explainStreamer, () => settings.effective().ai.model, (text) => companion.push({ type: 'explanation', title: 'Terminal explanation', text, at: new Date().toISOString() }));
   const chatStreamer: ChatStreamer = autotest !== 'off' ? stubChatStreamer : (opts, onDelta, signal) => groq.chatStream(opts, onDelta, signal);
   registerPracticeIpc(() => mainWin, chatStreamer, () => settings.effective().ai.model);
 
@@ -257,7 +267,7 @@ app.whenReady().then(async () => {
     visibility.setRecording(st, () => audio.stop());
   });
   // If the window is destroyed while recording, stop the mic (no orphaned capture).
-  win.on('closed', () => audio.stop());
+  win.on('closed', () => { void audio.stop(); void companion.stop(); });
 
   // register() returning true is not proof the key works (with the portal, the user has not even
   // confirmed yet); firedCount is what the autotest checks.
@@ -283,6 +293,7 @@ app.whenReady().then(async () => {
     if (first && autotest === 'mic-gate') void done.then(() => micGateAutotest(win, audio));
     if (first && autotest === 'stt') void done.then(() => sttAutotest(win));
     if (first && autotest === 'practice') void done.then(() => practiceAutotest(win, controller));
+    if (first && autotest === 'companion') void done.then(() => companionAutotest(win, companion));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {

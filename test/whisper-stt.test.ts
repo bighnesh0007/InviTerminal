@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseDiarizedTranscript, parseTranscript, WhisperStt, type SttPaths } from '../src/main/audio/WhisperStt';
+import { parseTranscript, parseTurnsFromJson, WhisperStt, type SttPaths } from '../src/main/audio/WhisperStt';
 import { encodeWav } from '../src/shared/wav';
 
 const MODEL = process.env.INVI_WHISPER_MODEL ?? join(homedir(), '.config/inviterminal/models/ggml-base.en.bin');
@@ -26,15 +26,21 @@ describe('parseTranscript', () => {
   });
 });
 
-describe('parseDiarizedTranscript', () => {
-  it('splits the text into speaker-turn segments on [SPEAKER_TURN]', () => {
-    expect(parseDiarizedTranscript(' What is your name? [SPEAKER_TURN] My name is Sam. ')).toEqual(['What is your name?', 'My name is Sam.']);
+describe('parseTurnsFromJson', () => {
+  it('splits into turns where speaker_turn_next is set, joining segments within a turn', () => {
+    const segs = [
+      { text: 'What is your name?', speaker_turn_next: true },
+      { text: 'My name is Sam', speaker_turn_next: false },
+      { text: 'and I am a developer.', speaker_turn_next: true },
+      { text: 'Great to meet you.' },
+    ];
+    expect(parseTurnsFromJson(segs)).toEqual(['What is your name?', 'My name is Sam and I am a developer.', 'Great to meet you.']);
   });
-  it('returns a single segment when there is no turn marker', () => {
-    expect(parseDiarizedTranscript('load_backend: x\n One speaker only.')).toEqual(['One speaker only.']);
+  it('returns one combined turn when no speaker change is flagged (tinydiarize missed it)', () => {
+    expect(parseTurnsFromJson([{ text: ' a ' }, { text: 'b' }])).toEqual(['a b']);
   });
-  it('drops empty segments', () => {
-    expect(parseDiarizedTranscript('[SPEAKER_TURN] hi [SPEAKER_TURN] [SPEAKER_TURN] bye')).toEqual(['hi', 'bye']);
+  it('is empty for no segments', () => {
+    expect(parseTurnsFromJson([])).toEqual([]);
   });
 });
 

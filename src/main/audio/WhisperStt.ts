@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { readFile, rm } from 'node:fs/promises';
 import { isAbsolute } from 'node:path';
 import type { SttStatus } from '../../shared/audio';
 
@@ -57,12 +58,31 @@ export function parseTranscript(stdout: string): string {
     .trim();
 }
 
-/** With -tdrz, whisper marks speaker changes with [SPEAKER_TURN]; split the text into turn segments. */
-export function parseDiarizedTranscript(stdout: string): string[] {
-  return joinedText(stdout)
-    .split('[SPEAKER_TURN]')
-    .map((s) => s.replace(/\s+/g, ' ').trim())
-    .filter((s) => s.length > 0);
+/** A segment of whisper's JSON output; tinydiarize sets speaker_turn_next when a speaker change follows. */
+export interface WhisperJsonSegment {
+  text: string;
+  speaker_turn_next?: boolean;
+}
+
+/**
+ * Builds speaker-turn segments from whisper's -tdrz JSON. A turn ends where a segment has
+ * speaker_turn_next: consecutive segments are joined until then. Detection is best-effort
+ * (tinydiarize misses some turns), so with no flags set this returns one combined turn.
+ */
+export function parseTurnsFromJson(segments: WhisperJsonSegment[]): string[] {
+  const turns: string[] = [];
+  let cur = '';
+  for (const seg of segments) {
+    cur += (cur ? ' ' : '') + (seg.text ?? '').trim();
+    if (seg.speaker_turn_next) {
+      const t = cur.replace(/\s+/g, ' ').trim();
+      if (t) turns.push(t);
+      cur = '';
+    }
+  }
+  const last = cur.replace(/\s+/g, ' ').trim();
+  if (last) turns.push(last);
+  return turns;
 }
 
 /**
@@ -121,10 +141,23 @@ export class WhisperStt {
       if (!s.available) throw new Error(s.reason ?? 'Speech-to-text is not available.');
       model = s.model;
     }
-    const args = ['-m', model, '-f', wavPath, '-nt', '-np', '-l', opts.language ?? 'en', '-t', String(opts.threads ?? 4)];
-    if (tdrz) args.push('-tdrz');
     const t0 = Date.now();
+    if (tdrz) {
+      // tinydiarize marks speaker turns only in the JSON (speaker_turn_next), so write JSON and read it back.
+      const base = wavPath.replace(/\.wav$/i, '');
+      const jsonPath = `${base}.json`;
+      const args = ['-m', model, '-f', wavPath, '-np', '-l', opts.language ?? 'en', '-t', String(opts.threads ?? 4), '-tdrz', '-oj', '-of', base];
+      await this.run(binary, args, opts.timeoutMs ?? 120_000);
+      try {
+        const parsed = JSON.parse(await readFile(jsonPath, 'utf8')) as { transcription?: WhisperJsonSegment[] };
+        const turns = parseTurnsFromJson(parsed.transcription ?? []);
+        return { text: turns.join(' '), ms: Date.now() - t0, turns };
+      } finally {
+        await rm(jsonPath, { force: true });
+      }
+    }
+    const args = ['-m', model, '-f', wavPath, '-nt', '-np', '-l', opts.language ?? 'en', '-t', String(opts.threads ?? 4)];
     const stdout = await this.run(binary, args, opts.timeoutMs ?? 120_000);
-    return { text: parseTranscript(stdout), ms: Date.now() - t0, ...(tdrz ? { turns: parseDiarizedTranscript(stdout) } : {}) };
+    return { text: parseTranscript(stdout), ms: Date.now() - t0 };
   }
 }

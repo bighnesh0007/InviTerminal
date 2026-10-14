@@ -266,7 +266,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     field('Capture source', liveSource),
     field('Chunk seconds (3–30)', liveChunk),
     field('Speaker-turn model (tinydiarize)', liveTdrz),
-    el('span', { className: 'field-note', text: 'Transcribes the meeting audio playing on this machine, locally. For speaker-turn labels, download the whisper tinydiarize model (~465MB) into <data dir>/models/: curl -L -o ~/.config/inviterminal/models/ggml-small.en-tdrz.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-tdrz.bin' }),
+    el('span', { className: 'field-note', text: 'Transcribes the meeting audio playing on this machine, locally. For speaker-turn labels, download the whisper tinydiarize model (~465MB) into <data dir>/models/: curl -L -o ~/.config/inviterminal/models/ggml-small.en-tdrz.bin https://huggingface.co/akashmjn/tinydiarize-whisper.cpp/resolve/main/ggml-small.en-tdrz.bin' }),
     el('div', { className: 'lib-actions' }, button('Save', save, say), button('Revert', () => load(), say)),
     message,
   );

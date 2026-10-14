@@ -1,7 +1,7 @@
 import { app, type BrowserWindow, clipboard } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { PALETTE, randomSequence, type CanarySequence } from '../shared/canary';
 import { findCanary } from '../shared/detect-canary';
 import { contentMayShow } from '../shared/protection';
@@ -53,7 +53,7 @@ export async function captureAutotest(win: BrowserWindow, controller: Protection
 
 export interface TerminalTap {
   /** Sessions spawned at the renderer's request, in order. */
-  spawned: { sessionId: string; pid: number }[];
+  spawned: { sessionId: string; pid: number; profileId: string }[];
   output: Map<string, string[]>;
   exits: Map<string, number>;
 }
@@ -202,7 +202,9 @@ export async function visibilityAutotest(
     const cli = (flag: string) =>
       new Promise<number>((res) => {
         const t0 = Date.now();
-        execFile(process.execPath, [app.getAppPath(), flag], { env: childEnv, timeout: 15_000 }, () => res(Date.now() - t0));
+        // Same data dir as this instance, or the child takes a different single-instance lock and starts its own app.
+        const env = { ...childEnv, INVI_USER_DATA_DIR: app.getPath('userData') };
+        execFile(process.execPath, [app.getAppPath(), flag], { env, timeout: 15_000 }, () => res(Date.now() - t0));
       });
     for (const [flag, want] of [['--toggle', false], ['--toggle', true], ['--hide', false], ['--show', true]] as const) {
       const t0 = Date.now();
@@ -381,7 +383,7 @@ export async function libraryAutotest(
     const multi = await store.create({ title: `multi ${nonce}`, body: `echo invi-ml1-${nonce}\necho invi-ml2-${nonce}\n`, folder: 'autotest/deep' });
     await store.create({ title: 'unrelated', body: 'uptime' });
 
-    await clickIn('header', 'Snippets (Ctrl+Shift+L)');
+    await clickIn('header', 'Snippets');
     await js(`(() => { const s = document.querySelector('.lib-search'); s.value = ${JSON.stringify(nonce)}; s.dispatchEvent(new Event('input')); })()`);
     await sleep(600);
     const listed = await js<string[]>(`[...document.querySelectorAll('.lib-item .lib-title')].map((e) => e.textContent)`);
@@ -466,6 +468,128 @@ export async function libraryAutotest(
     log('error', { message: (e as Error).message });
   } finally {
     if (savedClipboard) await clipboard.write(savedClipboard).catch(() => undefined);
+  }
+  win.close();
+}
+
+type Mod = 'control' | 'shift' | 'alt' | 'meta';
+
+function press(win: BrowserWindow, keyCode: string, modifiers: Mod[] = []): void {
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
+}
+
+async function typeLine(win: BrowserWindow, text: string): Promise<void> {
+  for (const ch of text) win.webContents.sendInputEvent({ type: 'char', keyCode: ch });
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+  win.webContents.sendInputEvent({ type: 'char', keyCode: '\r' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+  await sleep(700);
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Phase 5: tabs driven by real keystrokes, and settings edited through the UI (temp data dir). */
+export async function tabsSettingsAutotest(win: BrowserWindow, tap: TerminalTap, controller: ProtectionController, settingsFile: string): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  const nonce = randomBytes(3).toString('hex');
+  const out = (i: number) => (tap.output.get(tap.spawned[i]?.sessionId ?? '') ?? []).join('');
+  try {
+    await until('first shell', () => tap.spawned[0], 10_000);
+    await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
+    win.focus();
+    await sleep(500);
+
+    press(win, 'T', ['control', 'shift']);
+    await until('tab 2', () => tap.spawned[1], 5000);
+    press(win, 'T', ['control', 'shift']);
+    await until('tab 3', () => tap.spawned[2], 5000);
+    await sleep(800);
+    log('tabs-opened', { count: tap.spawned.length, distinctPids: new Set(tap.spawned.map((s) => s.pid)).size, profiles: tap.spawned.map((s) => s.profileId) });
+
+    await typeLine(win, `echo tab3-${nonce}`);
+    log('typing-goes-to-active-tab', { inTab3: printedLine(out(2), `tab3-${nonce}`), inTab1: printedLine(out(0), `tab3-${nonce}`), inTab2: printedLine(out(1), `tab3-${nonce}`) });
+
+    press(win, 'PageUp', ['control']);
+    await sleep(500);
+    await typeLine(win, `echo tab2-${nonce}`);
+    log('prev-tab', { inTab2: printedLine(out(1), `tab2-${nonce}`), inTab3: printedLine(out(2), `tab2-${nonce}`) });
+
+    const tab2Pid = tap.spawned[1]!.pid;
+    press(win, 'W', ['control', 'shift']);
+    await until('tab 2 shell gone', () => !alive(tab2Pid) || undefined, 4000).catch(() => undefined);
+    const tabsLeft = await js<number>(`document.querySelectorAll('.tab').length`);
+    await sleep(400);
+    await typeLine(win, `echo after-close-${nonce}`);
+    log('close-tab', { closedShellGone: !alive(tab2Pid), tabsLeft, typingNowInTab3: printedLine(out(2), `after-close-${nonce}`) });
+
+    // --- settings through the UI ---------------------------------------------------------
+    press(win, ',', ['control', 'shift']);
+    await sleep(600);
+    const panelOpen = await js<boolean>(`!document.querySelector('.settings').hidden`);
+    await js(`(() => {
+      const panel = document.querySelector('.settings');
+      const num = panel.querySelectorAll('input[type=number]');
+      num[0].value = '18';
+      const sel = panel.querySelector('select');
+      sel.value = 'sh';
+      panel.querySelector('.chord-input[data-action=newTab]').focus();
+    })()`);
+    press(win, 'N', ['control', 'alt']);
+    await sleep(200);
+    const recorded = await js<string>(`document.querySelector('.chord-input[data-action=newTab]').value`);
+    await js(`[...document.querySelectorAll('.settings button')].find((b) => b.textContent === 'Save').click()`);
+    await sleep(800);
+    const saved = JSON.parse(await readFile(settingsFile, 'utf8')) as { terminal: { fontSize: number; defaultProfile: string }; shortcuts: { newTab: string } };
+    const fontPx = await js<string>(`getComputedStyle(document.querySelector('.tab-host:not([hidden]) .xterm-rows')).fontSize`);
+    log('settings-saved', { panelOpen, recordedChord: recorded, file: { fontSize: saved.terminal.fontSize, defaultProfile: saved.terminal.defaultProfile, newTab: saved.shortcuts.newTab }, xtermFontSize: fontPx });
+
+    // Close the panel, then: the old chord is dead, the new one opens a tab with the new default shell.
+    press(win, ',', ['control', 'shift']);
+    await sleep(300);
+    const focusedBefore = await js<string>(`document.activeElement ? document.activeElement.className + ' ' + document.activeElement.tagName : 'none'`);
+    const before = tap.spawned.length;
+    press(win, 'T', ['control', 'shift']);
+    await sleep(900);
+    const oldChordOpened = tap.spawned.length > before;
+    press(win, 'N', ['control', 'alt']);
+    await until('tab from new chord', () => tap.spawned.length > before || undefined, 4000).catch(() => undefined);
+    log('rebound-shortcut', { focusedBefore, oldChordOpenedTab: oldChordOpened, newChordOpenedTab: tap.spawned.length > before, newTabProfile: tap.spawned[tap.spawned.length - 1]?.profileId });
+
+    // Invalid shortcuts: the panel refuses, and so does main when the panel is bypassed.
+    const fileBefore = await readFile(settingsFile, 'utf8');
+    press(win, ',', ['control', 'shift']);
+    await sleep(500);
+    await js(`document.querySelector('.chord-input[data-action=panicHide]').focus()`);
+    press(win, 'C', ['control']);
+    await sleep(200);
+    const fieldError = await js<string>(`document.querySelector('.chord-input[data-action=panicHide]').parentElement.querySelector('.field-error').textContent`);
+    await js(`[...document.querySelectorAll('.settings button')].find((b) => b.textContent === 'Save').click()`);
+    await sleep(400);
+    const panelMessage = await js<string>(`document.querySelector('.settings .lib-message').textContent`);
+    const mainRejects = await js<string>(`window.inviterminal.settings.update({ shortcuts: { panicHide: 'Ctrl+C' } }).then(() => 'ACCEPTED', (e) => String(e.message))`);
+    const smuggle = await js<string>(`window.inviterminal.settings.update({ terminal: { fontSize: 14 }, evil: true }).then(() => 'ACCEPTED', (e) => String(e.message).slice(0, 80))`);
+    log('invalid-refused', { fieldError, panelMessage, mainRejects: mainRejects.slice(0, 160), smuggledKey: smuggle, fileUnchanged: (await readFile(settingsFile, 'utf8')) === fileBefore });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}
+
+/** Second launch on the same data dir: settings must have persisted. */
+export async function settingsReadbackAutotest(win: BrowserWindow, tap: TerminalTap, view: () => unknown): Promise<void> {
+  try {
+    const first = await until('first shell', () => tap.spawned[0], 10_000);
+    log('readback', { firstTabProfile: first.profileId, view: view() });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
   }
   win.close();
 }

@@ -1,4 +1,13 @@
-import mongoose, { type Connection, type Model, Schema, Types } from 'mongoose';
+import type { Connection, Model, Schema, Types } from 'mongoose';
+
+/**
+ * Mongoose is loaded on first connect, not at startup: `inviterminal --toggle`
+ * starts a second process that only hands its flag over, and parsing the
+ * driver there doubled the hotkey latency (measured ~190 → ~400 ms).
+ */
+type MongooseModule = typeof import('mongoose');
+let mongooseModule: Promise<MongooseModule> | null = null;
+const loadMongoose = (): Promise<MongooseModule> => (mongooseModule ??= import('mongoose'));
 import { LANGUAGES, rankSnippets, type Language, type SearchQuery, type Snippet, type SnippetInput } from '../../shared/snippet';
 import { escapeRegex, normalizeFolder, normalizeTags } from './normalize';
 
@@ -19,31 +28,38 @@ export interface SnippetDoc {
 
 export const LIMITS = { title: 200, body: 262_144, description: 2000 } as const;
 
-/** Exported for tests of the schema itself; the app only uses it through LibraryStore. */
-export const snippetSchema = new Schema<SnippetDoc>(
-  {
-    title: { type: String, required: true, trim: true, minlength: 1, maxlength: LIMITS.title },
-    body: { type: String, required: true, maxlength: LIMITS.body },
-    description: { type: String, default: '', maxlength: LIMITS.description },
-    language: { type: String, enum: LANGUAGES, default: 'bash' },
-    tags: { type: [String], default: [] },
-    folder: { type: String, default: '' },
-    lastUsedAt: { type: Date, default: null },
-    useCount: { type: Number, default: 0, min: 0 },
-    deletedAt: { type: Date, default: null },
-  },
-  {
-    timestamps: true,
-    // Unknown fields are an error, not silently dropped or stored.
-    strict: 'throw',
-    // Indexes are created explicitly in connect(), only after the URI passed validation.
-    autoIndex: false,
-    autoCreate: false,
-  },
-);
-snippetSchema.index({ deletedAt: 1, updatedAt: -1 });
-snippetSchema.index({ folder: 1 });
-snippetSchema.index({ tags: 1 });
+/** Built once, after Mongoose has loaded. Exported for tests of the schema itself. */
+let schemaCache: Schema<SnippetDoc> | null = null;
+export async function buildSnippetSchema(): Promise<Schema<SnippetDoc>> {
+  if (schemaCache) return schemaCache;
+  const { Schema } = await loadMongoose();
+  const snippetSchema = new Schema<SnippetDoc>(
+    {
+      title: { type: String, required: true, trim: true, minlength: 1, maxlength: LIMITS.title },
+      body: { type: String, required: true, maxlength: LIMITS.body },
+      description: { type: String, default: '', maxlength: LIMITS.description },
+      language: { type: String, enum: LANGUAGES, default: 'bash' },
+      tags: { type: [String], default: [] },
+      folder: { type: String, default: '' },
+      lastUsedAt: { type: Date, default: null },
+      useCount: { type: Number, default: 0, min: 0 },
+      deletedAt: { type: Date, default: null },
+    },
+    {
+      timestamps: true,
+      // Unknown fields are an error, not silently dropped or stored.
+      strict: 'throw',
+      // Indexes are created explicitly in connect(), only after the URI passed validation.
+      autoIndex: false,
+      autoCreate: false,
+    },
+  );
+  snippetSchema.index({ deletedAt: 1, updatedAt: -1 });
+  snippetSchema.index({ folder: 1 });
+  snippetSchema.index({ tags: 1 });
+  schemaCache = snippetSchema;
+  return snippetSchema;
+}
 
 const SEARCH_LIMIT = 500;
 
@@ -64,9 +80,9 @@ function toDto(d: SnippetDoc): Snippet {
   };
 }
 
-function objectId(id: string): Types.ObjectId {
-  if (!Types.ObjectId.isValid(id) || !/^[0-9a-f]{24}$/.test(id)) throw new Error('Invalid snippet id.');
-  return new Types.ObjectId(id);
+function objectId(m: MongooseModule, id: string): Types.ObjectId {
+  if (!m.Types.ObjectId.isValid(id) || !/^[0-9a-f]{24}$/.test(id)) throw new Error('Invalid snippet id.');
+  return new m.Types.ObjectId(id);
 }
 
 /**
@@ -76,17 +92,19 @@ function objectId(id: string): Types.ObjectId {
  */
 export class LibraryStore {
   private constructor(
+    private readonly m: MongooseModule,
     private readonly conn: Connection,
     private readonly Snippets: Model<SnippetDoc>,
   ) {}
 
   static async connect(uri: string, opts: { serverSelectionTimeoutMS?: number } = {}): Promise<LibraryStore> {
-    const conn = mongoose.createConnection(uri, { serverSelectionTimeoutMS: opts.serverSelectionTimeoutMS ?? 2000, autoIndex: false, autoCreate: false });
+    const m = await loadMongoose();
+    const conn = m.default.createConnection(uri, { serverSelectionTimeoutMS: opts.serverSelectionTimeoutMS ?? 2000, autoIndex: false, autoCreate: false });
     await conn.asPromise();
-    const model = conn.model<SnippetDoc>('Snippet', snippetSchema, 'snippets');
+    const model = conn.model<SnippetDoc>('Snippet', await buildSnippetSchema(), 'snippets');
     await model.createCollection();
     await model.createIndexes();
-    return new LibraryStore(conn, model);
+    return new LibraryStore(m, conn, model);
   }
 
   async close(): Promise<void> {
@@ -110,7 +128,7 @@ export class LibraryStore {
   }
 
   async get(id: string): Promise<Snippet | null> {
-    const d = await this.Snippets.findById(objectId(id)).lean<SnippetDoc>();
+    const d = await this.Snippets.findById(objectId(this.m, id)).lean<SnippetDoc>();
     return d ? toDto(d) : null;
   }
 
@@ -135,27 +153,27 @@ export class LibraryStore {
     if (patch.language !== undefined) set.language = patch.language;
     if (patch.tags !== undefined) set.tags = normalizeTags(patch.tags);
     if (patch.folder !== undefined) set.folder = normalizeFolder(patch.folder);
-    const d = await this.Snippets.findOneAndUpdate({ _id: objectId(id), deletedAt: null }, { $set: set }, { new: true, runValidators: true }).lean<SnippetDoc>();
+    const d = await this.Snippets.findOneAndUpdate({ _id: objectId(this.m, id), deletedAt: null }, { $set: set }, { new: true, runValidators: true }).lean<SnippetDoc>();
     if (!d) throw new Error('Snippet not found.');
     return toDto(d);
   }
 
   /** Moves to trash; restore() undoes it. Nothing in the app hard-deletes. */
   async trash(id: string): Promise<Snippet> {
-    const d = await this.Snippets.findOneAndUpdate({ _id: objectId(id), deletedAt: null }, { $set: { deletedAt: new Date() } }, { new: true, timestamps: false }).lean<SnippetDoc>();
+    const d = await this.Snippets.findOneAndUpdate({ _id: objectId(this.m, id), deletedAt: null }, { $set: { deletedAt: new Date() } }, { new: true, timestamps: false }).lean<SnippetDoc>();
     if (!d) throw new Error('Snippet not found.');
     return toDto(d);
   }
 
   async restore(id: string): Promise<Snippet> {
-    const d = await this.Snippets.findOneAndUpdate({ _id: objectId(id), deletedAt: { $ne: null } }, { $set: { deletedAt: null } }, { new: true, timestamps: false }).lean<SnippetDoc>();
+    const d = await this.Snippets.findOneAndUpdate({ _id: objectId(this.m, id), deletedAt: { $ne: null } }, { $set: { deletedAt: null } }, { new: true, timestamps: false }).lean<SnippetDoc>();
     if (!d) throw new Error('Snippet not found in trash.');
     return toDto(d);
   }
 
   /** Bumps usage for ranking; does not count as an edit (updatedAt unchanged). */
   async recordUse(id: string): Promise<void> {
-    await this.Snippets.updateOne({ _id: objectId(id), deletedAt: null }, { $inc: { useCount: 1 }, $set: { lastUsedAt: new Date() } }, { timestamps: false });
+    await this.Snippets.updateOne({ _id: objectId(this.m, id), deletedAt: null }, { $inc: { useCount: 1 }, $set: { lastUsedAt: new Date() } }, { timestamps: false });
   }
 
   async folders(): Promise<string[]> {

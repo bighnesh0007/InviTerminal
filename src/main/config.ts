@@ -5,19 +5,17 @@ import { isValidGlobalAccelerator } from './visibility/accelerator';
 const EnvSchema = z.object({
   INVI_RECHECK_INTERVAL_MS: z.coerce.number().int().min(1000).max(600_000).default(10_000),
   /** Development aid: drive the real app (capture self-test, or a real shell session), log JSON, and quit. */
-  INVI_AUTOTEST: z.enum(['off', 'screenshot', 'terminal', 'ui-snapshot', 'visibility', 'portal-shortcut', 'library']).default('off'),
+  INVI_AUTOTEST: z.enum(['off', 'screenshot', 'terminal', 'ui-snapshot', 'visibility', 'portal-shortcut', 'library', 'tabs-settings', 'settings-readback']).default('off'),
   /** Where ui-snapshot writes its PNG. Absolute path, .png only. */
   INVI_SNAPSHOT_PATH: z.string().regex(/^\/.+\.png$/).optional(),
-  /**
-   * Opt-in global toggle shortcut, e.g. "Control+Alt+T". On Wayland it goes through the
-   * xdg-desktop-portal GlobalShortcuts interface: KDE asks the user to confirm and stores
-   * the binding in ~/.config/kglobalshortcutsrc. Unset = no global shortcut (use the CLI).
-   */
+  /** Overrides settings.json for this run (dev/tests): the portal global shortcut, e.g. "Control+Alt+T". */
   INVI_GLOBAL_SHORTCUT: z.string().refine(isValidGlobalAccelerator, 'not a valid global accelerator (needs a modifier)').optional(),
-  /** Snippet library. Its own database on the local mongod by default; checked by checkMongoUri before use. */
-  INVI_MONGODB_URI: z.string().default('mongodb://127.0.0.1:27017/inviterminal'),
-  /** Snippets can contain secrets: a non-local MongoDB is refused unless this is "1". */
-  INVI_MONGODB_ALLOW_REMOTE: z.enum(['0', '1']).default('0'),
+  /** Overrides settings.json for this run: the library MongoDB URI. */
+  INVI_MONGODB_URI: z.string().optional(),
+  /** Overrides settings.json for this run: "1" allows a non-local MongoDB. */
+  INVI_MONGODB_ALLOW_REMOTE: z.enum(['0', '1']).optional(),
+  /** Use another app data directory (settings, single-instance lock). Autotests use a temp dir so real settings are never touched. */
+  INVI_USER_DATA_DIR: z.string().regex(/^\/.+/).optional(),
 });
 
 const env = EnvSchema.parse(process.env);
@@ -47,12 +45,17 @@ export const config = {
   recheckIntervalMs: env.INVI_RECHECK_INTERVAL_MS,
   autotest: env.INVI_AUTOTEST,
   snapshotPath: env.INVI_SNAPSHOT_PATH,
-  globalShortcut: env.INVI_GLOBAL_SHORTCUT,
-  mongoUri: env.INVI_MONGODB_URI,
-  mongoAllowRemote: env.INVI_MONGODB_ALLOW_REMOTE === '1',
+  userDataDir: env.INVI_USER_DATA_DIR,
   canaryPaintTimeoutMs: 3000,
   /** Extra time for a painted frame to reach the compositor. */
   compositorSettleMs: 250,
   screenshotTimeoutMs: 15_000,
   screencastTimeoutMs: 120_000,
 } as const;
+
+/** Environment values that override settings.json for this run only. */
+export const settingsEnvOverrides = {
+  ...(env.INVI_MONGODB_URI !== undefined ? { mongoUri: env.INVI_MONGODB_URI } : {}),
+  ...(env.INVI_MONGODB_ALLOW_REMOTE !== undefined ? { allowRemote: env.INVI_MONGODB_ALLOW_REMOTE === '1' } : {}),
+  ...(env.INVI_GLOBAL_SHORTCUT !== undefined ? { globalShortcut: env.INVI_GLOBAL_SHORTCUT } : {}),
+};

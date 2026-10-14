@@ -4,7 +4,10 @@ import type { RendererApi, ScreencastReport } from '../shared/ipc';
 import { contentMayShow, type ProtectionLevel, type ProtectionState, type SelfTestRecord } from '../shared/protection';
 import { button as makeButton, el } from './dom';
 import { mountLibrary } from './library';
-import { mountTerminal } from './terminal';
+import { actionForEvent, canonicalChord, DEFAULT_KEYMAP, type AppAction, type Keymap } from '../shared/keymap';
+import { DEFAULT_SETTINGS, type SettingsView } from '../shared/settings';
+import { mountSettings } from './settings';
+import { mountTabs } from './tabs';
 
 declare global {
   interface Window {
@@ -67,6 +70,7 @@ function renderMain(): void {
   const history = el('ul', { className: 'history' });
   const gaps = el('ul', { className: 'gaps' });
 
+  // Tab hosts live here; the tab bar sits above it inside the same covered area.
   const termHost = el('div', { className: 'term-host' });
   const gate = el('div', { className: 'gate' }, el('p', { text: 'Terminal hidden until the compositor confirms this window is excluded from capture. Keystrokes are not sent to the shell meanwhile.' }));
   const termWrap = el('main', { className: 'term-wrap' }, termHost, gate, canary);
@@ -89,24 +93,47 @@ function renderMain(): void {
   const stillConcealed = () => concealedAt !== null && !(state !== null && contentMayShow(state.level) && state.appliedAt !== null && state.appliedAt > concealedAt);
   const inputAllowed = () => override || (state !== null && contentMayShow(state.level) && !stillConcealed());
 
-  const view = mountTerminal(termHost, api, inputAllowed, () => {
-    gate.classList.remove('pulse');
-    void gate.offsetWidth; // restart the animation
-    gate.classList.add('pulse');
-  });
+  let termOptions = { fontSize: DEFAULT_SETTINGS.terminal.fontSize, scrollback: DEFAULT_SETTINGS.terminal.scrollback };
+  let keymap: Keymap = { ...DEFAULT_KEYMAP };
 
+  const tabs = mountTabs(termHost, api, {
+    inputAllowed,
+    onBlockedInput: () => {
+      gate.classList.remove('pulse');
+      void gate.offsetWidth; // restart the animation
+      gate.classList.add('pulse');
+    },
+    terminalOptions: () => termOptions,
+  });
+  termWrap.prepend(tabs.bar);
+
+  const panelChanged = () => {
+    const anyOpen = library.isOpen() || settingsPanel.isOpen();
+    termWrap.classList.toggle('lib-open', anyOpen);
+    requestAnimationFrame(() => {
+      tabs.fit();
+      // Closing the last panel hands the keyboard back to the terminal.
+      if (!anyOpen) tabs.active()?.focus();
+    });
+  };
   const library = mountLibrary(api, {
     paste: (text) => {
-      view.paste(text);
-      view.focus();
+      tabs.active()?.paste(text);
+      tabs.active()?.focus();
     },
     onOpenChange: (open) => {
-      termWrap.classList.toggle('lib-open', open);
-      requestAnimationFrame(() => view.fit());
+      if (open) settingsPanel.close();
+      panelChanged();
     },
     inputAllowed,
   });
-  termWrap.append(library.element);
+  const settingsPanel = mountSettings(api, {
+    onOpenChange: (open) => {
+      if (open && library.isOpen()) library.toggle();
+      panelChanged();
+    },
+  });
+  termWrap.append(library.element, settingsPanel.element);
 
   gate.append(
     button('Show anyway', () => {
@@ -127,9 +154,11 @@ function renderMain(): void {
     gate.hidden = show;
     termHost.classList.toggle('concealed', !show);
     library.element.classList.toggle('concealed', !show);
+    settingsPanel.element.classList.toggle('concealed', !show);
+    tabs.bar.classList.toggle('concealed', !show);
     // Nothing behind the cover may keep keyboard focus (e.g. the snippet search box).
     if (!show && document.activeElement instanceof HTMLElement && termWrap.contains(document.activeElement)) document.activeElement.blur();
-    if (show && wasHidden) view.focus();
+    if (show && wasHidden) tabs.active()?.focus();
     // Problems should not hide behind a collapsed drawer.
     if ((s.level === 'unsupported' || s.level === 'selftest-failed' || s.level === 'request-failed') && drawer.hidden) drawerToggle.click();
 
@@ -202,12 +231,29 @@ function renderMain(): void {
     gaps,
   );
 
-  const hideButton = button('Hide (Ctrl+Shift+H)', () => api.visibility.panicHide());
-  const libraryButton = button('Snippets (Ctrl+Shift+L)', () => library.toggle());
-  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), libraryButton, hideButton, drawerToggle), drawer, termWrap);
+  const hideButton = button('Hide', () => api.visibility.panicHide());
+  const libraryButton = button('Snippets', () => library.toggle());
+  const settingsButton = button('Settings', () => settingsPanel.toggle());
+  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), libraryButton, settingsButton, hideButton, drawerToggle), drawer, termWrap);
+
+  // Button tooltips show the current shortcuts.
+  const showChords = () => {
+    hideButton.title = `Hide now (${canonicalChord(keymap.panicHide)})`;
+    libraryButton.title = `Snippet library (${canonicalChord(keymap.toggleLibrary)})`;
+    settingsButton.title = `Settings (${canonicalChord(keymap.openSettings)})`;
+  };
+  const applySettings = (v: SettingsView) => {
+    keymap = v.effective.shortcuts;
+    termOptions = { fontSize: v.effective.terminal.fontSize, scrollback: v.effective.terminal.scrollback };
+    tabs.setOptions(termOptions);
+    void tabs.refreshProfiles();
+    showChords();
+  };
+  api.settings.onChange(applySettings);
+  void api.settings.get().then(applySettings);
 
   // The drawer changes the terminal's height.
-  new ResizeObserver(() => view.fit()).observe(drawer);
+  new ResizeObserver(() => tabs.fit()).observe(drawer);
 
   api.visibility.onConceal(({ token, at }) => {
     concealedAt = at;
@@ -217,19 +263,26 @@ function renderMain(): void {
     requestAnimationFrame(() => requestAnimationFrame(() => api.visibility.concealed(token)));
   });
 
-  // Ctrl+Shift+H hides immediately, whether focus is in the terminal or elsewhere.
+  const actions: Record<AppAction, () => void> = {
+    panicHide: () => api.visibility.panicHide(),
+    toggleLibrary: () => library.toggle(),
+    openSettings: () => settingsPanel.toggle(),
+    newTab: () => tabs.newTab(),
+    closeTab: () => tabs.closeActive(),
+    nextTab: () => tabs.next(),
+    prevTab: () => tabs.prev(),
+  };
+  // App shortcuts are taken in the capture phase, before xterm.js sees the key, so they never reach the shell.
   window.addEventListener(
     'keydown',
     (e) => {
-      if (e.ctrlKey && e.shiftKey && e.code === 'KeyH') {
-        e.preventDefault();
-        e.stopPropagation();
-        api.visibility.panicHide();
-      } else if (e.ctrlKey && e.shiftKey && e.code === 'KeyL') {
-        e.preventDefault();
-        e.stopPropagation();
-        library.toggle();
-      }
+      // The settings panel's shortcut fields record keys; they must not trigger actions.
+      if (e.target instanceof HTMLElement && e.target.classList.contains('chord-input')) return;
+      const action = actionForEvent(keymap, e);
+      if (!action) return;
+      e.preventDefault();
+      e.stopPropagation();
+      actions[action]();
     },
     { capture: true },
   );

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { CanarySequence } from '../shared/canary';
 import { type ConcealRequest, IPC, type RendererApi, type ScreencastReport } from '../shared/ipc';
 import type { ProtectionState } from '../shared/protection';
+import type { SettingsView } from '../shared/settings';
 import type { LibraryStatus } from '../shared/snippet';
 
 // Each function maps to exactly one channel; the renderer never sees ipcRenderer itself.
@@ -29,10 +30,14 @@ const api: RendererApi = {
     ack: (sessionId, chars) => ipcRenderer.send(IPC.termAck, { sessionId, chars }),
     kill: (sessionId) => ipcRenderer.send(IPC.termKill, { sessionId }),
     onData: (cb) => {
-      ipcRenderer.on(IPC.termData, (_e, sessionId: string, data: string) => cb(sessionId, data));
+      const l = (_e: Electron.IpcRendererEvent, sessionId: string, data: string) => cb(sessionId, data);
+      ipcRenderer.on(IPC.termData, l);
+      return () => void ipcRenderer.removeListener(IPC.termData, l);
     },
     onExit: (cb) => {
-      ipcRenderer.on(IPC.termExit, (_e, sessionId: string, exitCode: number, signal: number | null) => cb(sessionId, exitCode, signal));
+      const l = (_e: Electron.IpcRendererEvent, sessionId: string, exitCode: number, signal: number | null) => cb(sessionId, exitCode, signal);
+      ipcRenderer.on(IPC.termExit, l);
+      return () => void ipcRenderer.removeListener(IPC.termExit, l);
     },
   },
   clipboard: {
@@ -60,6 +65,13 @@ const api: RendererApi = {
     used: (id) => ipcRenderer.invoke(IPC.libUsed, { id }),
     folders: () => ipcRenderer.invoke(IPC.libFolders),
     tags: () => ipcRenderer.invoke(IPC.libTags),
+  },
+  settings: {
+    get: () => ipcRenderer.invoke(IPC.settingsGet),
+    update: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch),
+    onChange: (cb) => {
+      ipcRenderer.on(IPC.settingsChanged, (_e, v: SettingsView) => cb(v));
+    },
   },
 };
 

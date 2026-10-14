@@ -11,11 +11,11 @@ export class LibraryService {
   private store: LibraryStore | null = null;
   private status: LibraryStatus;
   private connecting: Promise<void> | null = null;
-  private readonly target: string;
+  private target: string;
 
   constructor(
-    private readonly uri: string,
-    private readonly allowRemote: boolean,
+    private uri: string,
+    private allowRemote: boolean,
     private readonly onStatus: (s: LibraryStatus) => void,
     private readonly connect: (uri: string) => Promise<LibraryStore> = (u) => LibraryStore.connect(u),
   ) {
@@ -64,6 +64,18 @@ export class LibraryService {
   require(): LibraryStore {
     if (!this.store) throw new Error(this.status.state === 'unavailable' ? this.status.reason : 'Library is still connecting.');
     return this.store;
+  }
+
+  /** Switches to another URI (settings change): closes the old connection, then connects anew. */
+  async reconfigure(uri: string, allowRemote: boolean): Promise<void> {
+    if (uri === this.uri && allowRemote === this.allowRemote) return;
+    await this.connecting?.catch(() => undefined);
+    await this.close();
+    this.uri = uri;
+    this.allowRemote = allowRemote;
+    const check = checkMongoUri(uri, allowRemote);
+    this.target = check.ok ? `${check.host}/${check.dbName}` : 'invalid URI';
+    await this.start();
   }
 
   async close(): Promise<void> {

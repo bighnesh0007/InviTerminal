@@ -229,6 +229,7 @@ export function mountLibrary(api: RendererApi, opts: { paste(text: string): void
   return {
     element: panel,
     toggle() {
+      if (!panel.hidden && document.activeElement instanceof HTMLElement && panel.contains(document.activeElement)) document.activeElement.blur();
       panel.hidden = !panel.hidden;
       opts.onOpenChange(!panel.hidden);
       if (!panel.hidden) {

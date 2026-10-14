@@ -1,5 +1,6 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
+import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
 
 export const IPC = {
@@ -45,6 +46,10 @@ export const IPC = {
   libUsed: 'library:used',
   libFolders: 'library:folders',
   libTags: 'library:tags',
+  settingsGet: 'settings:get',
+  settingsUpdate: 'settings:update',
+  /** main → renderer */
+  settingsChanged: 'settings:changed',
 } as const;
 
 export interface ConcealRequest {
@@ -100,8 +105,9 @@ export interface RendererApi {
     resize(sessionId: string, cols: number, rows: number): void;
     ack(sessionId: string, chars: number): void;
     kill(sessionId: string): void;
-    onData(cb: (sessionId: string, data: string) => void): void;
-    onExit(cb: (sessionId: string, exitCode: number, signal: number | null) => void): void;
+    /** Returns an unsubscribe function (tabs close). */
+    onData(cb: (sessionId: string, data: string) => void): () => void;
+    onExit(cb: (sessionId: string, exitCode: number, signal: number | null) => void): () => void;
   };
   clipboard: {
     read(): Promise<string>;
@@ -124,5 +130,10 @@ export interface RendererApi {
     used(id: string): Promise<void>;
     folders(): Promise<string[]>;
     tags(): Promise<string[]>;
+  };
+  settings: {
+    get(): Promise<SettingsView>;
+    update(patch: SettingsPatch): Promise<SettingsView>;
+    onChange(cb: (v: SettingsView) => void): void;
   };
 }

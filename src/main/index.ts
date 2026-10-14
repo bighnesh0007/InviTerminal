@@ -1,16 +1,20 @@
 import { app, type BrowserWindow, desktopCapturer, globalShortcut, ipcMain, type IpcMainInvokeEvent, powerMonitor, screen, session } from 'electron';
 import * as nodePty from 'node-pty';
-import { accessSync, constants, readFileSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { captureAutotest, createTerminalTap, libraryAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { captureAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
 import { createUnsupportedProvider } from './capture/providers/unsupported';
 import { SelfTestRunner } from './capture/selftest/SelfTestRunner';
-import { config, sessionEnv, shellParentEnv } from './config';
+import { config, sessionEnv, settingsEnvOverrides, shellParentEnv } from './config';
+import { SettingsStore } from './settings/SettingsStore';
+import { SettingsPatchSchema } from './settings/schema';
+import { detectWindowsShellProfiles } from './terminal/windows-shells';
 import { isFromWindow } from './ipc-guard';
 import { buildChildEnv } from './terminal/env';
 import { PtyManager } from './terminal/PtyManager';
@@ -38,11 +42,17 @@ if (process.getuid?.() === 0) {
   app.exit(1);
 }
 
+// Must precede the single-instance lock and settings, which both live in the data directory.
+if (config.userDataDir) app.setPath('userData', config.userDataDir);
+
 if (!app.requestSingleInstanceLock()) app.exit(0);
+
+const settings = SettingsStore.loadSync(app.getPath('userData'), settingsEnvOverrides);
+const startupGlobalShortcut = settings.startupValue('globalShortcut');
 
 // Wayland apps cannot grab keys; Chromium can ask the xdg-desktop-portal instead. Opt-in only:
 // KDE shows a confirmation dialog and persists the binding in ~/.config/kglobalshortcutsrc.
-if (config.globalShortcut && process.platform === 'linux' && sessionEnv.XDG_SESSION_TYPE === 'wayland') {
+if (startupGlobalShortcut && process.platform === 'linux' && sessionEnv.XDG_SESSION_TYPE === 'wayland') {
   app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
 }
 
@@ -75,7 +85,22 @@ function guard<A extends unknown[], R>(fn: (...args: A) => R) {
   };
 }
 
+/** Windows facts for profile detection. NOT YET RUN ON WINDOWS (Windows is a later phase). */
+function windowsProfiles() {
+  const systemRoot = shellParentEnv().SystemRoot ?? 'C:\\Windows';
+  let wslListOutput: Buffer | null = null;
+  try {
+    wslListOutput = execFileSync(`${systemRoot}\\System32\\wsl.exe`, ['--list', '--quiet'], { timeout: 3000 });
+  } catch {
+    // WSL absent or no distros.
+  }
+  const pf = shellParentEnv().ProgramFiles ?? 'C:\\Program Files';
+  const pwsh = `${pf}\\PowerShell\\7\\pwsh.exe`;
+  return detectWindowsShellProfiles({ systemRoot, comSpec: shellParentEnv().ComSpec, exists: existsSync, pwshPath: existsSync(pwsh) ? pwsh : null, wslListOutput });
+}
+
 function createPtyManager(tap: ReturnType<typeof createTerminalTap> | null): PtyManager {
+  if (process.platform === 'win32') return makeManager(windowsProfiles(), tap);
   let etcShells = '';
   try {
     etcShells = readFileSync('/etc/shells', 'utf8');
@@ -95,6 +120,10 @@ function createPtyManager(tap: ReturnType<typeof createTerminalTap> | null): Pty
     },
     realpath: (p) => realpathSync(p),
   });
+  return makeManager(profiles, tap);
+}
+
+function makeManager(profiles: ReturnType<typeof detectShellProfiles>, tap: ReturnType<typeof createTerminalTap> | null): PtyManager {
   return new PtyManager((file, args, opts) => nodePty.spawn(file, args, opts), profiles, () => buildChildEnv(shellParentEnv(), app.getVersion()), homedir(), {
     data: (sessionId, data) => {
       tap?.output.set(sessionId, [...(tap.output.get(sessionId) ?? []), data]);
@@ -115,30 +144,47 @@ app.whenReady().then(async () => {
   const env = classifyEnvironment(process.platform, sessionEnv);
   const provider = env.kind === 'kwin-wayland' ? createKwinProvider() : createUnsupportedProvider(env.reason);
 
-  const tap = autotest === 'terminal' || autotest === 'ui-snapshot' || autotest === 'visibility' || autotest === 'library' ? createTerminalTap() : null;
+  const tap = ['terminal', 'ui-snapshot', 'visibility', 'library', 'tabs-settings', 'settings-readback'].includes(autotest) ? createTerminalTap() : null;
   const manager = createPtyManager(tap);
   if (tap) {
     const spawn = manager.spawn.bind(manager);
     manager.spawn = (profileId) => {
       const info = spawn(profileId);
-      tap.spawned.push({ sessionId: info.sessionId, pid: info.pid });
+      tap.spawned.push({ sessionId: info.sessionId, pid: info.pid, profileId: info.profileId });
       return info;
     };
   }
   registerTerminalIpc(() => mainWin, manager);
 
-  // The library autotest uses a throwaway mongod (system binary, temp dir) — never the shared server.
+  // Every autotest uses a throwaway mongod (system binary, temp dir) — never the shared server.
   let memServer: { getUri(): string; stop(): Promise<boolean> } | null = null;
-  if (autotest === 'library') {
+  if (autotest !== 'off') {
     const { MongoMemoryServer } = await import('mongodb-memory-server-core');
     memServer = await MongoMemoryServer.create({ binary: { systemBinary: '/usr/bin/mongod', version: '8.0.15' } });
-    await pingRealMongo(config.mongoUri);
+    if (autotest === 'library') await pingRealMongo(settings.effective().library.mongoUri);
   }
-  const library = new LibraryService(memServer ? `${memServer.getUri()}inviterminal_autotest` : config.mongoUri, config.mongoAllowRemote, (s) => {
+  manager.setDefaultProfile(settings.effective().terminal.defaultProfile);
+  const lib0 = settings.effective().library;
+  const library = new LibraryService(memServer ? `${memServer.getUri()}inviterminal_autotest` : lib0.mongoUri, lib0.allowRemote, (s) => {
     if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.libStatusChanged, s);
   });
   registerLibraryIpc(() => mainWin, library);
   void library.start();
+
+  // Settings: applied live where possible; startup-only values are flagged as needing a restart.
+  settings.onChange((v) => {
+    manager.setDefaultProfile(v.effective.terminal.defaultProfile);
+    if (!memServer) void library.reconfigure(v.effective.library.mongoUri, v.effective.library.allowRemote);
+    if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.settingsChanged, v);
+  });
+  ipcMain.handle(IPC.settingsGet, (e) => {
+    if (!isFromWindow(e, mainWin)) throw new Error('IPC from unexpected sender');
+    return settings.view();
+  });
+  ipcMain.handle(IPC.settingsUpdate, (e, raw: unknown) => {
+    if (!isFromWindow(e, mainWin)) throw new Error('IPC from unexpected sender');
+    return settings.update(SettingsPatchSchema.parse(raw) as Parameters<SettingsStore['update']>[0]);
+  });
   app.on('will-quit', () => {
     void library.close();
     void memServer?.stop();
@@ -164,9 +210,9 @@ app.whenReady().then(async () => {
 
   // register() returning true is not proof the key works (with the portal, the user has not even
   // confirmed yet); firedCount is what the autotest checks.
-  const shortcut: ShortcutStatus = { accelerator: config.globalShortcut ?? null, registerReturned: null, firedCount: 0 };
-  if (config.globalShortcut) {
-    shortcut.registerReturned = globalShortcut.register(config.globalShortcut, () => {
+  const shortcut: ShortcutStatus = { accelerator: startupGlobalShortcut, registerReturned: null, firedCount: 0 };
+  if (startupGlobalShortcut) {
+    shortcut.registerReturned = globalShortcut.register(startupGlobalShortcut, () => {
       shortcut.firedCount++;
       void visibility.controller.toggle();
     });
@@ -179,6 +225,8 @@ app.whenReady().then(async () => {
     const done = first ? controller.initialise() : controller.protect();
     if (first && autotest === 'screenshot') void done.then(() => captureAutotest(win, controller, r));
     if (first && tap && autotest === 'terminal') void done.then(() => terminalAutotest(win, manager, tap));
+    if (first && tap && autotest === 'tabs-settings') void done.then(() => tabsSettingsAutotest(win, tap, controller, settings.path));
+    if (first && tap && autotest === 'settings-readback') void done.then(() => settingsReadbackAutotest(win, tap, () => settings.view()));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {

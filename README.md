@@ -8,7 +8,7 @@ mainstream screen shares and recordings on supported desktops. It does nothing
 about cameras, remote desktop, compromised machines, accessibility APIs or the
 clipboard. See [docs/01-feasibility-and-architecture.md](docs/01-feasibility-and-architecture.md) §2.5.
 
-## Status — Phase 4 (snippet library)
+## Status — Phase 5 (settings, shortcuts, tabs)
 
 | Platform | Status |
 |---|---|
@@ -29,21 +29,29 @@ Enter. Multi-line snippets ask first.
 
 Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 [Phase 3](docs/04-phase3-visibility-results.md) ·
-[Phase 4](docs/05-phase4-library-results.md).
+[Phase 4](docs/05-phase4-library-results.md) ·
+[Phase 5](docs/06-phase5-settings-tabs-results.md).
+
+**Settings** (Ctrl+Shift+Comma) live in `settings.json` in the app data directory
+(`~/.config/inviterminal/` by default, mode 0600). Font, scrollback, the shell for new
+tabs, the shortcuts and the library database apply immediately. Shortcuts are recorded
+by pressing them; any that would steal a key the shell needs are refused.
 
 Until packaging, the dev form of `inviterminal` is:
 `node_modules/electron/dist/electron /path/to/InviTerminal --toggle`
 
+Default keys (all in-app keys are configurable in Settings):
+
 | Key / command | Action |
 |---|---|
 | **Ctrl+Shift+H** | Hide now (panic). Also the Hide button and the tray's "Hide now" |
-| `inviterminal --toggle` / `--show` / `--hide` | Control the running window from anywhere; bind `--toggle` to a key in KDE System Settings → Keyboard → Shortcuts → Add New → Command |
+| Ctrl+Shift+T / Ctrl+Shift+W | New tab / close tab (kills its shell) |
+| Ctrl+PageDown / Ctrl+PageUp | Next / previous tab |
+| Ctrl+Shift+L | Snippet library |
+| Ctrl+Shift+Comma | Settings |
+| Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste (fixed) |
+| `inviterminal --toggle` / `--show` / `--hide` | Control the running window from anywhere; bind `--toggle` in KDE System Settings → Keyboard → Shortcuts → Add New → Command |
 | Tray icon click | Show / hide |
-| **Ctrl+Shift+L** | Snippet library: search, insert, copy, edit, delete/undo |
-| Ctrl+Shift+C | Copy selection |
-| Ctrl+Shift+V | Paste (bracketed when the shell supports it) |
-| Ctrl+C | Interrupt (sent to the shell as usual) |
-| Enter after exit | Start a new shell |
 
 ## Requirements (Linux)
 
@@ -54,13 +62,17 @@ Until packaging, the dev form of `inviterminal` is:
 - MongoDB for the snippet library. Defaults to `mongodb://127.0.0.1:27017/inviterminal`;
   the terminal works without it
 
-## Configuration (environment)
+## Configuration
 
-| Variable | Default | Meaning |
+Settings are edited in the app (Ctrl+Shift+Comma). These environment variables override
+them for a single run, mostly for development:
+
+| Variable | Overrides | Meaning |
 |---|---|---|
-| `INVI_MONGODB_URI` | `mongodb://127.0.0.1:27017/inviterminal` | Library database. Must name its own database |
-| `INVI_MONGODB_ALLOW_REMOTE` | `0` | `1` allows a non-local MongoDB (snippets leave this machine) |
-| `INVI_GLOBAL_SHORTCUT` | unset | Opt-in portal global shortcut, e.g. `Control+Alt+T`. **Needs an installed .desktop file on KDE**; see Phase 4 results |
+| `INVI_MONGODB_URI` | Library → MongoDB URI | Must name its own database; non-local hosts are refused… |
+| `INVI_MONGODB_ALLOW_REMOTE` | …unless this is `1` | Snippets would leave this machine |
+| `INVI_GLOBAL_SHORTCUT` | Global shortcut | Portal shortcut, e.g. `Control+Alt+T`. Needs an installed .desktop file on KDE (Phase 6) |
+| `INVI_USER_DATA_DIR` | — | Use another data directory (settings, single-instance lock); the autotests use a temp one |
 
 ## Run
 
@@ -113,6 +125,14 @@ INVI_AUTOTEST=library npm start
 That runs the library checks against a throwaway `mongod`: search, insert (never
 executes), multi-line confirmation, copy, edit, delete/undo, and the gate.
 
+```bash
+INVI_USER_DATA_DIR=$(mktemp -d) INVI_AUTOTEST=tabs-settings npm start
+```
+
+That runs tabs and settings with real keystrokes: open/switch/close tabs, settings saved
+through the UI, rebinding a shortcut, and invalid shortcuts refused. Every autotest uses a
+throwaway `mongod`.
+
 ## How protection status is reported
 
 | Badge | Meaning |
@@ -132,13 +152,14 @@ src/main/            Electron main process (trusted)
   capture/           provider interface, KWin + unsupported providers, controller, self-test
   terminal/          shell detection, child env, PtyManager + flow control, IPC schemas
   visibility/        CLI flags, VisibilityController (cover-then-hide), tray, accelerator check
-  library/           MongoDB store (Mongoose), URI policy, service/retry, IPC schemas
+  library/           MongoDB store (Mongoose, lazily loaded), URI policy, service/retry, IPC schemas
+  settings/          settings.json store (atomic, 0600, corrupt-file handling) + zod schema
   autotest.ts        INVI_AUTOTEST drivers (dev builds only)
   config.ts          the only module that reads environment variables
 src/preload/         contextBridge API (sandboxed)
 src/renderer/        UI (sandboxed, no Node; CSP: scripts self-only, inline styles allowed for xterm.js)
-src/shared/          canary generator, detector, verdict, IPC contract — used by all sides
+src/shared/          canary, detector, verdict, keymap rules, settings/snippet types, IPC contract
 test/                Vitest; fixtures are recorded from real KWin replies
-docs/                feasibility/architecture, Phase 1–4 results, checklist
+docs/                feasibility/architecture, Phase 1–5 results, checklist
 assets/              tray icon (generated by scripts/gen-tray-icon.py)
 ```

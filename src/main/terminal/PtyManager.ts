@@ -44,6 +44,8 @@ const BATCH_MAX_CHARS = 65_536;
 
 export class PtyManager {
   private readonly sessions = new Map<string, Session>();
+  /** From settings; ignored if it names a profile that was not detected on this machine. */
+  private preferredDefault: string | null = null;
 
   constructor(
     private readonly spawnPty: SpawnPty,
@@ -53,14 +55,22 @@ export class PtyManager {
     private readonly events: PtyEvents,
   ) {}
 
+  setDefaultProfile(id: string | null): void {
+    this.preferredDefault = id;
+  }
+
+  get defaultProfileId(): string {
+    return this.preferredDefault && this.profiles.profiles.some((p) => p.id === this.preferredDefault) ? this.preferredDefault : this.profiles.defaultId;
+  }
+
   listProfiles(): { id: string; label: string; isDefault: boolean }[] {
-    return this.profiles.profiles.map((p) => ({ id: p.id, label: p.label, isDefault: p.id === this.profiles.defaultId }));
+    return this.profiles.profiles.map((p) => ({ id: p.id, label: p.label, isDefault: p.id === this.defaultProfileId }));
   }
 
   /** The renderer chooses a profile id; the file and arguments come only from the detected table. */
   spawn(profileId?: string): SessionInfo {
     if (this.sessions.size >= MAX_SESSIONS) throw new Error(`At most ${MAX_SESSIONS} terminal sessions.`);
-    const id = profileId ?? this.profiles.defaultId;
+    const id = profileId ?? this.defaultProfileId;
     const profile = this.profiles.profiles.find((p) => p.id === id);
     if (!profile) throw new Error(`Unknown shell profile "${id}".`);
 

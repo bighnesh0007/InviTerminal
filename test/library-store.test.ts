@@ -1,7 +1,7 @@
 import { MongoMemoryServer } from 'mongodb-memory-server-core';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import mongoose from 'mongoose';
-import { LibraryStore, snippetSchema } from '../src/main/library/LibraryStore';
+import { buildSnippetSchema, LibraryStore } from '../src/main/library/LibraryStore';
 
 // A throwaway mongod (the system binary, random port, temp dbpath). Never the shared server on :27017.
 let server: MongoMemoryServer;
@@ -121,7 +121,7 @@ describe('snippet schema (defence in depth behind LibraryStore)', () => {
   it('throws on unknown fields instead of storing or silently dropping them', async () => {
     const conn = await mongoose.createConnection(`${server.getUri()}schema_check`).asPromise();
     try {
-      const M = conn.model('SchemaCheck', snippetSchema, 'snippets');
+      const M = conn.model('SchemaCheck', await buildSnippetSchema(), 'snippets');
       await expect(M.create({ title: 't', body: 'b', isAdmin: true } as never)).rejects.toThrow(/not in schema|strict/i);
     } finally {
       await conn.close();

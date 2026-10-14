@@ -26,7 +26,19 @@ export const IPC = {
   termExit: 'term:exit',
   clipboardRead: 'clipboard:read',
   clipboardWrite: 'clipboard:write',
+  /** main → renderer: cover the content before the window is hidden. */
+  conceal: 'visibility:conceal',
+  /** renderer → main: the cover for that token has been painted. */
+  concealed: 'visibility:concealed',
+  /** renderer → main: hide now (Ctrl+Shift+H or the Hide button). */
+  panicHide: 'visibility:panic-hide',
 } as const;
+
+export interface ConcealRequest {
+  token: number;
+  /** ISO time from the main process; content stays covered until protection is re-applied after it. */
+  at: string;
+}
 
 export interface ShellProfileInfo {
   id: string;
@@ -81,5 +93,10 @@ export interface RendererApi {
   clipboard: {
     read(): Promise<string>;
     write(text: string): Promise<void>;
+  };
+  visibility: {
+    onConceal(cb: (req: ConcealRequest) => void): void;
+    concealed(token: number): void;
+    panicHide(): void;
   };
 }

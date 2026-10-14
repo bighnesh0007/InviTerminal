@@ -1,9 +1,15 @@
 import { app, type BrowserWindow } from 'electron';
+import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
+import { PALETTE, randomSequence, type CanarySequence } from '../shared/canary';
+import { findCanary } from '../shared/detect-canary';
+import { contentMayShow } from '../shared/protection';
 import type { ProtectionController } from './capture/ProtectionController';
-import type { SelfTestRunner } from './capture/selftest/SelfTestRunner';
+import { spectacleFind, type SelfTestRunner } from './capture/selftest/SelfTestRunner';
 import type { PtyManager } from './terminal/PtyManager';
+import type { VisibilityWiring } from './visibility/register';
+import * as kwin from './capture/kwin/dbus';
 
 /**
  * Development aid (INVI_AUTOTEST). Drives the real app against the real
@@ -154,6 +160,145 @@ export async function uiSnapshotAutotest(win: BrowserWindow, manager: PtyManager
     await sleep(300);
     await typeText(`echo open-${nonce}`);
     log('gate-after-protect', { level: controller.get().level, keystrokesReachedShell: seen(`open-${nonce}`) });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}
+
+/** Shell-printed canary: truecolour background blocks, so the "sensitive content" is real terminal output. */
+function terminalCanaryCommand(seq: CanarySequence): string {
+  const row = seq.map((c) => `\\033[48;2;${PALETTE[c]!.join(';')}m    `).join('') + '\\033[0m\\n';
+  return `clear; printf '${row.repeat(6)}'\r`;
+}
+
+function findInBitmap(img: Electron.NativeImage, seq: CanarySequence): boolean {
+  const { width, height } = img.getSize();
+  const data = img.toBitmap();
+  return (['bgra', 'rgba'] as const).some((order) => findCanary({ data, width, height, order }, seq).found);
+}
+
+/**
+ * Phase 3: CLI toggle via a real second process, tray activation over D-Bus,
+ * Ctrl+Shift+H, and the show-to-reapply gap measured with Spectacle.
+ */
+export async function visibilityAutotest(
+  win: BrowserWindow,
+  manager: PtyManager,
+  tap: TerminalTap,
+  controller: ProtectionController,
+  visibility: VisibilityWiring,
+  runner: SelfTestRunner,
+  childEnv: Record<string, string>,
+): Promise<void> {
+  const waitVisible = (want: boolean, ms = 4000) => until(`window ${want ? 'shown' : 'hidden'}`, () => win.isVisible() === want || undefined, ms);
+  const confirmed = () => contentMayShow(controller.get().level);
+  try {
+    const first = await until('renderer to spawn a shell', () => tap.spawned[0], 10_000);
+    await until('protection confirmed', () => confirmed() || undefined, 10_000);
+
+    // --- CLI through a real second instance -------------------------------------------
+    const cli = (flag: string) =>
+      new Promise<number>((res) => {
+        const t0 = Date.now();
+        execFile(process.execPath, [app.getAppPath(), flag], { env: childEnv, timeout: 15_000 }, () => res(Date.now() - t0));
+      });
+    for (const [flag, want] of [['--toggle', false], ['--toggle', true], ['--hide', false], ['--show', true]] as const) {
+      const t0 = Date.now();
+      const procMs = await cli(flag);
+      await waitVisible(want);
+      log('cli', { flag, visibleAfter: win.isVisible(), expected: want, ms: Date.now() - t0, secondInstanceMs: procMs });
+    }
+    await sleep(600);
+    log('focus-after-cli-show', { focused: win.isFocused() });
+    await until('protection re-confirmed', () => confirmed() || undefined, 10_000);
+
+    // --- Tray activation via StatusNotifierItem D-Bus (what the Plasma panel calls) ------
+    const items = await new Promise<string>((res) =>
+      execFile('gdbus', ['call', '--session', '--dest', 'org.kde.StatusNotifierWatcher', '--object-path', '/StatusNotifierWatcher', '--method', 'org.freedesktop.DBus.Properties.Get', 'org.kde.StatusNotifierWatcher', 'RegisteredStatusNotifierItems'], (_e, out) => res(out)),
+    );
+    const ours = [...items.matchAll(/'([^']+)'/g)].map((m) => m[1]!).find((i) => i.includes(`-${process.pid}-`));
+    log('tray-registered', { item: ours ?? null });
+    if (ours) {
+      const slash = ours.indexOf('/');
+      const [service, objPath] = [ours.slice(0, slash), ours.slice(slash)];
+      await new Promise<void>((res) => execFile('gdbus', ['call', '--session', '--dest', service, '--object-path', objPath, '--method', 'org.kde.StatusNotifierItem.Activate', '0', '0'], () => res()));
+      await waitVisible(false).catch(() => undefined);
+      log('tray-activate', { visibleAfter: win.isVisible(), expected: false });
+      await visibility.controller.show();
+      await until('protection re-confirmed', () => confirmed() || undefined, 10_000);
+    }
+
+    // --- Ctrl+Shift+H ---------------------------------------------------------------------
+    win.focus();
+    await sleep(300);
+    const tKey = Date.now();
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'H', modifiers: ['control', 'shift'] });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'H', modifiers: ['control', 'shift'] });
+    await waitVisible(false).catch(() => undefined);
+    log('panic-key', { visibleAfter: win.isVisible(), expected: false, ms: Date.now() - tKey });
+    await visibility.controller.show();
+    await until('protection re-confirmed', () => confirmed() || undefined, 10_000);
+    await sleep(500);
+
+    // --- The show → re-apply gap ------------------------------------------------------------
+    const termSeq = randomSequence();
+    manager.input(first.sessionId, terminalCanaryCommand(termSeq));
+    await sleep(1000);
+    // Proves the shell-printed canary is detectable at all (renderer-side capture, sees the real pixels).
+    log('terminal-canary-detectable', { found: findInBitmap(await win.webContents.capturePage(), termSeq) });
+
+    await runner.withControlWindow(async (controlSeq) => {
+      win.focus();
+      await sleep(300);
+      const hidden = await visibility.controller.hide('cli');
+      log('gap-hide', { concealedBeforeHide: hidden.concealed, ms: hidden.ms });
+      await sleep(600);
+
+      const tShow = Date.now();
+      let confirmedAt: number | null = null;
+      const poll = setInterval(() => {
+        if (confirmedAt === null && confirmed() && controller.get().appliedAt && Date.parse(controller.get().appliedAt!) >= tShow) confirmedAt = Date.now() - tShow;
+      }, 5);
+      // Independent of the controller: when does KWin first know the new window, and when does its flag first read true?
+      const kwinSeen: { firstSeenMs: number | null; firstSeenExcluded: boolean | null; excludedAtMs: number | null } = { firstSeenMs: null, firstSeenExcluded: null, excludedAtMs: null };
+      const kwinPoll = (async () => {
+        while (Date.now() - tShow < 1500 && kwinSeen.excludedAtMs === null) {
+          try {
+            for (const uuid of await kwin.matchWindowUuids(win.getTitle())) {
+              const info = await kwin.getWindowInfo(uuid);
+              if (!info || info.pid !== process.pid || info.caption !== win.getTitle()) continue;
+              const ms = Date.now() - tShow;
+              if (kwinSeen.firstSeenMs === null) Object.assign(kwinSeen, { firstSeenMs: ms, firstSeenExcluded: info.excludeFromCapture ?? null });
+              if (info.excludeFromCapture === true) kwinSeen.excludedAtMs = ms;
+            }
+          } catch {
+            // window not mapped yet
+          }
+        }
+      })();
+      void visibility.controller.show();
+      // Renderer-side view immediately after show: must be the cover, not the terminal.
+      const early = await win.webContents.capturePage();
+      const earlyMs = Date.now() - tShow;
+      const captures: object[] = [];
+      while (Date.now() - tShow < 2500) {
+        const startMs = Date.now() - tShow;
+        const r = await spectacleFind({ protectedSeq: termSeq, controlSeq });
+        captures.push({ startMs, endMs: Date.now() - tShow, terminalCanaryFound: r.protectedFound, controlFound: r.controlFound });
+      }
+      clearInterval(poll);
+      await kwinPoll;
+      log('gap-kwin', kwinSeen);
+      log('gap', {
+        rendererShowsTerminalAtMs: earlyMs,
+        rendererShowsTerminal: findInBitmap(early, termSeq),
+        protectionConfirmedAfterShowMs: confirmedAt,
+        captures,
+      });
+    });
+    await sleep(300);
+    log('terminal-restored-after-reconfirm', { found: findInBitmap(await win.webContents.capturePage(), termSeq), level: controller.get().level });
   } catch (e) {
     log('error', { message: (e as Error).message });
   }

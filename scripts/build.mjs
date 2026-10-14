@@ -16,3 +16,4 @@ await mkdir('dist/renderer', { recursive: true });
 await cp('src/renderer/index.html', 'dist/renderer/index.html');
 await cp('src/renderer/styles.css', 'dist/renderer/styles.css');
 await cp('node_modules/@xterm/xterm/css/xterm.css', 'dist/renderer/xterm.css');
+await cp('assets', 'dist/assets', { recursive: true });

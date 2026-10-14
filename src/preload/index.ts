@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type { CanarySequence } from '../shared/canary';
-import { IPC, type RendererApi, type ScreencastReport } from '../shared/ipc';
+import { type ConcealRequest, IPC, type RendererApi, type ScreencastReport } from '../shared/ipc';
 import type { ProtectionState } from '../shared/protection';
 
 // Each function maps to exactly one channel; the renderer never sees ipcRenderer itself.
@@ -37,6 +37,13 @@ const api: RendererApi = {
   clipboard: {
     read: () => ipcRenderer.invoke(IPC.clipboardRead),
     write: (text) => ipcRenderer.invoke(IPC.clipboardWrite, { text }),
+  },
+  visibility: {
+    onConceal: (cb) => {
+      ipcRenderer.on(IPC.conceal, (_e, req: ConcealRequest) => cb(req));
+    },
+    concealed: (token) => ipcRenderer.send(IPC.concealed, token),
+    panicHide: () => ipcRenderer.send(IPC.panicHide),
   },
 };
 

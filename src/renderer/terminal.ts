@@ -103,6 +103,8 @@ export function mountTerminal(container: HTMLElement, api: RendererApi, inputAll
       if (sel) void api.clipboard.write(sel);
       return false;
     }
+    // Panic hide is handled at window level; keep xterm from also sending it to the shell.
+    if (e.code === 'KeyH') return false;
     if (e.code === 'KeyV') {
       // term.paste() applies bracketed-paste markers when the shell asked for them.
       void api.clipboard.read().then((t) => term.paste(t));

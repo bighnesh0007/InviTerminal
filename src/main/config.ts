@@ -4,7 +4,7 @@ import { z } from 'zod';
 const EnvSchema = z.object({
   INVI_RECHECK_INTERVAL_MS: z.coerce.number().int().min(1000).max(600_000).default(10_000),
   /** Development aid: drive the real app (capture self-test, or a real shell session), log JSON, and quit. */
-  INVI_AUTOTEST: z.enum(['off', 'screenshot', 'terminal', 'ui-snapshot']).default('off'),
+  INVI_AUTOTEST: z.enum(['off', 'screenshot', 'terminal', 'ui-snapshot', 'visibility']).default('off'),
   /** Where ui-snapshot writes its PNG. Absolute path, .png only. */
   INVI_SNAPSHOT_PATH: z.string().regex(/^\/.+\.png$/).optional(),
 });

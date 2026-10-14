@@ -4,7 +4,7 @@ import { accessSync, constants, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { captureAutotest, createTerminalTap, terminalAutotest, uiSnapshotAutotest } from './autotest';
+import { captureAutotest, createTerminalTap, terminalAutotest, uiSnapshotAutotest, visibilityAutotest } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -16,6 +16,7 @@ import { buildChildEnv } from './terminal/env';
 import { PtyManager } from './terminal/PtyManager';
 import { registerTerminalIpc } from './terminal/register';
 import { detectShellProfiles } from './terminal/shells';
+import { registerVisibility } from './visibility/register';
 import { createWindow } from './window';
 
 const ScreencastReportSchema = z
@@ -106,7 +107,7 @@ app.whenReady().then(() => {
   const env = classifyEnvironment(process.platform, sessionEnv);
   const provider = env.kind === 'kwin-wayland' ? createKwinProvider() : createUnsupportedProvider(env.reason);
 
-  const tap = autotest === 'terminal' || autotest === 'ui-snapshot' ? createTerminalTap() : null;
+  const tap = autotest === 'terminal' || autotest === 'ui-snapshot' || autotest === 'visibility' ? createTerminalTap() : null;
   const manager = createPtyManager(tap);
   if (tap) {
     const spawn = manager.spawn.bind(manager);
@@ -125,6 +126,7 @@ app.whenReady().then(() => {
   });
   runner = new SelfTestRunner(win, () => createWindow('control', { title: config.controlTitle, width: 640, height: 260 }));
   const r = runner;
+  const visibility = registerVisibility(win);
 
   // A hidden-then-shown Wayland window is a new KWin window with the flag cleared, so every show re-applies.
   let first = true;
@@ -132,6 +134,10 @@ app.whenReady().then(() => {
     const done = first ? controller.initialise() : controller.protect();
     if (first && autotest === 'screenshot') void done.then(() => captureAutotest(win, controller, r));
     if (first && tap && autotest === 'terminal') void done.then(() => terminalAutotest(win, manager, tap));
+    if (first && tap && autotest === 'visibility') {
+      const childEnv = buildChildEnv(shellParentEnv(), app.getVersion());
+      void done.then(() => visibilityAutotest(win, manager, tap, controller, visibility, r, childEnv));
+    }
     if (first && tap && autotest === 'ui-snapshot' && config.snapshotPath) {
       const out = config.snapshotPath;
       void done.then(() => uiSnapshotAutotest(win, manager, tap, out, controller));

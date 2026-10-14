@@ -100,7 +100,14 @@ function renderMain(): void {
 
   let state: ProtectionState | null = null;
   let override = false;
-  const inputAllowed = () => override || (state !== null && contentMayShow(state.level));
+  /**
+   * Set just before the window is hidden. A re-shown window is a new,
+   * unprotected compositor window, so the content stays covered until
+   * protection has been re-applied *after* this moment.
+   */
+  let concealedAt: string | null = null;
+  const stillConcealed = () => concealedAt !== null && !(state !== null && contentMayShow(state.level) && state.appliedAt !== null && state.appliedAt > concealedAt);
+  const inputAllowed = () => override || (state !== null && contentMayShow(state.level) && !stillConcealed());
 
   const view = mountTerminal(termHost, api, inputAllowed, () => {
     gate.classList.remove('pulse');
@@ -117,6 +124,7 @@ function renderMain(): void {
 
   function render(s: ProtectionState): void {
     state = s;
+    if (concealedAt !== null && !stillConcealed()) concealedAt = null;
     pill.textContent = LEVEL_TEXT[s.level];
     pill.dataset.level = s.level;
     detail.textContent = s.detail;
@@ -198,10 +206,32 @@ function renderMain(): void {
     gaps,
   );
 
-  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), drawerToggle), drawer, termWrap);
+  const hideButton = button('Hide (Ctrl+Shift+H)', () => api.visibility.panicHide());
+  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), hideButton, drawerToggle), drawer, termWrap);
 
   // The drawer changes the terminal's height.
   new ResizeObserver(() => view.fit()).observe(drawer);
+
+  api.visibility.onConceal(({ token, at }) => {
+    concealedAt = at;
+    // An override covered the window as it was; a re-shown window has to earn it again.
+    override = false;
+    if (state) render(state);
+    requestAnimationFrame(() => requestAnimationFrame(() => api.visibility.concealed(token)));
+  });
+
+  // Ctrl+Shift+H hides immediately, whether focus is in the terminal or elsewhere.
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyH') {
+        e.preventDefault();
+        e.stopPropagation();
+        api.visibility.panicHide();
+      }
+    },
+    { capture: true },
+  );
 
   api.onState(render);
   void api.getState().then(render);

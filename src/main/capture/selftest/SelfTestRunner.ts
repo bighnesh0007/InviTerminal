@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomSequence } from '../../../shared/canary';
+import { randomSequence, type CanarySequence } from '../../../shared/canary';
 import { findCanary, type Frame } from '../../../shared/detect-canary';
 import { IPC, type ScreencastPrepared, type ScreencastReport } from '../../../shared/ipc';
 import type { SelfTestRecord } from '../../../shared/protection';
@@ -35,6 +35,45 @@ function runSpectacle(outFile: string): Promise<void> {
       err ? reject(new Error((err as NodeJS.ErrnoException).code === 'ENOENT' ? 'spectacle is not installed' : stderr.trim() || err.message)) : resolve(),
     );
   });
+}
+
+export interface CaptureFind {
+  protectedFound: boolean;
+  controlFound: boolean;
+  width: number;
+  height: number;
+  order: Frame['order'];
+}
+
+/** Looks for both canaries in a bitmap; the control canary decides the byte order. */
+export function findBoth(data: Uint8Array, width: number, height: number, seqs: { protectedSeq: CanarySequence; controlSeq: CanarySequence }): CaptureFind {
+  for (const order of ['bgra', 'rgba'] as const) {
+    const frame: Frame = { data, width, height, order };
+    if (findCanary(frame, seqs.controlSeq).found) {
+      return { protectedFound: findCanary(frame, seqs.protectedSeq).found, controlFound: true, width, height, order };
+    }
+  }
+  const protectedFound = (['bgra', 'rgba'] as const).some((order) => findCanary({ data, width, height, order }, seqs.protectedSeq).found);
+  return { protectedFound, controlFound: false, width, height, order: 'bgra' };
+}
+
+/**
+ * Takes one full-desktop Spectacle screenshot and analyses it. The image
+ * holds the whole screen, so it lives in a private temp dir and is deleted
+ * before this returns.
+ */
+export async function spectacleFind(seqs: { protectedSeq: CanarySequence; controlSeq: CanarySequence }): Promise<CaptureFind> {
+  const dir = await mkdtemp(join(tmpdir(), 'inviterminal-selftest-'));
+  try {
+    const file = join(dir, 'capture.png');
+    await runSpectacle(file);
+    const img = nativeImage.createFromPath(file);
+    if (img.isEmpty()) throw new Error('screenshot file could not be decoded');
+    const { width, height } = img.getSize();
+    return findBoth(img.toBitmap(), width, height, seqs);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -93,32 +132,36 @@ export class SelfTestRunner {
     this.busy = true;
     const seqs = this.newSequences();
     let control: BrowserWindow | null = null;
-    // The screenshot holds the whole screen, so it lives in a private temp dir and is deleted immediately.
-    const dir = await mkdtemp(join(tmpdir(), 'inviterminal-selftest-'));
     try {
       control = await this.showCanaries(seqs);
-      const file = join(dir, 'capture.png');
-      await runSpectacle(file);
-      const img = nativeImage.createFromPath(file);
-      if (img.isEmpty()) throw new Error('screenshot file could not be decoded');
-      const { width, height } = img.getSize();
-      const data = img.toBitmap();
-      // The control canary decides the pixel byte order: whichever order finds it is the right one.
-      for (const order of ['bgra', 'rgba'] as const) {
-        const frame: Frame = { data, width, height, order };
-        if (findCanary(frame, seqs.controlSeq).found) {
-          const protectedFound = findCanary(frame, seqs.protectedSeq).found;
-          return this.record('kwin-screenshot', protectedFound, true, `Spectacle full-desktop screenshot ${width}×${height}, byte order ${order}.`);
-        }
-      }
-      const protectedFound = findCanary({ data, width, height, order: 'bgra' }, seqs.protectedSeq).found || findCanary({ data, width, height, order: 'rgba' }, seqs.protectedSeq).found;
-      return this.record('kwin-screenshot', protectedFound, false, `Spectacle full-desktop screenshot ${width}×${height}; control canary not found.`);
+      const r = await spectacleFind(seqs);
+      const detail = `Spectacle full-desktop screenshot ${r.width}×${r.height}${r.controlFound ? `, byte order ${r.order}` : '; control canary not found'}.`;
+      return this.record('kwin-screenshot', r.protectedFound, r.controlFound, detail);
     } catch (e) {
       return this.errorRecord('kwin-screenshot', e);
     } finally {
       if (control) this.hideCanaries(control);
-      await rm(dir, { recursive: true, force: true });
       this.busy = false;
+    }
+  }
+
+  /**
+   * Opens the unprotected control window with its own canary, runs `fn`, and
+   * closes it. For tests whose protected canary is drawn by something else
+   * (e.g. the shell itself).
+   */
+  async withControlWindow<T>(fn: (controlSeq: CanarySequence) => Promise<T>): Promise<T> {
+    const controlSeq = randomSequence();
+    const control = this.createControlWindow();
+    try {
+      await new Promise<void>((resolve) => control.once('show', () => resolve()));
+      const painted = waitPainted(control, config.canaryPaintTimeoutMs);
+      control.webContents.send(IPC.canary, controlSeq);
+      await painted;
+      await sleep(config.compositorSettleMs);
+      return await fn(controlSeq);
+    } finally {
+      if (!control.isDestroyed()) control.close();
     }
   }
 

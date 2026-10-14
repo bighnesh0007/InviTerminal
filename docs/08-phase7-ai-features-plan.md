@@ -1,6 +1,6 @@
 ---
 type: decision-record
-status: Phase 7 complete — 7a–7e built and verified (explain, mic gate, local STT, interview practice). Real Anthropic round-trips need the user's key.
+status: Phase 7 complete; provider switched Anthropic → Groq (user directive). Real Groq round-trips need the user's free key.
 verified-on: 2026-10-14
 ---
 
@@ -386,6 +386,30 @@ Anthropic (no key in this environment) and the record→transcribe→submit path
 A harness bug was caught and fixed: the autotest's sync `until` was given async predicates
 (a Promise is always truthy), so it returned before the stream arrived; replaced with an
 awaiting `waitFor`.
+
+## Provider switch: Anthropic → Groq (2026-10-14)
+
+Per the user's directive, the LLM provider is **Groq** (console.groq.com — free, fast
+inference on open models), replacing Anthropic. What changed:
+- Dependency `@anthropic-ai/sdk` → **`groq-sdk`** (external to the bundle, lazy-loaded).
+- `GroqClient` (was `AnthropicClient`): OpenAI-compatible `chat.completions.create` with
+  `stream:true`; `testKey` validates the key via `models.list` and checks the chosen model
+  is available.
+- Models: `llama-3.3-70b-versatile` (default), `llama-3.1-8b-instant`, `openai/gpt-oss-120b`,
+  `openai/gpt-oss-20b`. Key env `GROQ_API_KEY`; keys `gsk_…` (the redactor masks them).
+- UI/text say "Groq"; the explain system prompt and the practice loop are unchanged (the
+  streamer interface is provider-agnostic, so the controllers and stubs were untouched).
+- **Vision**: no Groq model is confirmed vision-capable here, so the "attach image" toggle
+  was removed from the explain confirm UI (the IPC/main/client plumbing stays for a future
+  vision model via `modelSupportsVision`). Explain is text-only.
+
+Verified: 189 tests (key store now `gsk_`/`GROQ_API_KEY`; settings default
+`llama-3.3-70b-versatile`; redactor masks `gsk_…`); `npm audit --omit=dev` 0; capture
+regression passes. Live stubs (`ai-key`, `ai-explain`, `practice`): key stored encrypted +
+masked (`gsk_fa…cdef`), confirm-preview masks a `gsk_` canary ("Groq API key"), nothing sent
+before confirm, redaction authoritative (model received no canary), practice loop streams Q →
+answer → feedback + next Q. **Not verified:** real Groq calls (no key in this environment) —
+the user adds a free key in Settings and clicks Test key.
 
 ## 7. Decisions (made 2026-10-14)
 

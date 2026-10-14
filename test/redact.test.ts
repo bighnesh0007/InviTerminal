@@ -8,6 +8,7 @@ describe('redactSecrets', () => {
     // [input, the exact secret VALUE that must disappear]
     const cases: [string, string][] = [
       ['export ANTHROPIC_API_KEY=sk-ant-abc123DEF456ghi789', 'sk-ant-abc123DEF456ghi789'],
+      ['standalone gsk_abcdefghij0123456789ABCDEFGHIJ here', 'gsk_abcdefghij0123456789ABCDEFGHIJ'],
       ['standalone sk-ant-abc123DEF456ghi789 here', 'sk-ant-abc123DEF456ghi789'],
       ['AWS key AKIAIOSFODNN7EXAMPLE here', 'AKIAIOSFODNN7EXAMPLE'],
       ['curl -H "Authorization: Bearer ey.longtokenvalue1234567890abc"', 'ey.longtokenvalue1234567890abc'],

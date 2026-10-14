@@ -19,7 +19,7 @@ function fakeSafeStorage(available = true): SafeStorageLike {
 }
 
 const tempDir = () => mkdtemp(join(tmpdir(), 'invi-key-test-'));
-const KEY = 'sk-ant-test-0123456789abcdef';
+const KEY = 'gsk_test0123456789abcdefGHIJ';
 
 describe('KeyStore', () => {
   it('reports no key on a fresh store', async () => {
@@ -48,23 +48,19 @@ describe('KeyStore', () => {
     await s.setKey(KEY);
     const st = await s.status();
     expect(st).toMatchObject({ source: 'keychain', present: true });
-    expect(st.hint).toBe('sk-ant…cdef');
+    expect(st.hint).toBe('gsk_te…GHIJ');
     expect(st.hint).not.toContain(KEY);
   });
 
   it('lets the environment override and never persists it', async () => {
     const dir = await tempDir();
-    const s = new KeyStore(dir, fakeSafeStorage(), { ANTHROPIC_API_KEY: `env-${KEY}` });
+    const s = new KeyStore(dir, fakeSafeStorage(), { GROQ_API_KEY: `env-${KEY}` });
     expect(await s.getKey()).toBe(`env-${KEY}`);
     expect(await s.status()).toMatchObject({ source: 'env', present: true });
     expect(await readdir(dir)).toEqual([]); // nothing written
     await expect(s.setKey('another-key-value')).rejects.toThrow(/environment/);
   });
 
-  it('accepts ANTHROPIC_AUTH_TOKEN as well', async () => {
-    const s = new KeyStore(await tempDir(), fakeSafeStorage(), { ANTHROPIC_AUTH_TOKEN: 'tok-abcdefghij' });
-    expect(await s.getKey()).toBe('tok-abcdefghij');
-  });
 
   it('refuses to save when no keychain is available, and says to use the env var', async () => {
     const dir = await tempDir();
@@ -82,7 +78,7 @@ describe('KeyStore', () => {
 
   it('ignores a blank env var and falls through to the keychain', async () => {
     const dir = await tempDir();
-    const s = new KeyStore(dir, fakeSafeStorage(), { ANTHROPIC_API_KEY: '   ' });
+    const s = new KeyStore(dir, fakeSafeStorage(), { GROQ_API_KEY: '   ' });
     await s.setKey(KEY);
     expect(await s.getKey()).toBe(KEY);
     expect(await s.status()).toMatchObject({ source: 'keychain' });

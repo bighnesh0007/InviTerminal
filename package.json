@@ -19,7 +19,7 @@
     "dist:dir": "npm run build && electron-builder --linux dir"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.133.0",
+    "groq-sdk": "^1.6.0",
     "mongoose": "^9.11.2",
     "node-pty": "^1.1.0"
   },

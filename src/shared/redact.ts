@@ -1,5 +1,5 @@
 /**
- * Masks obvious secrets before terminal text is sent to Anthropic. This is a
+ * Masks obvious secrets before terminal text is sent to the AI provider (Groq). This is a
  * best-effort safety net, NOT a guarantee — it reduces accidental leaks of
  * common credential shapes; it cannot catch every secret. The UI says so.
  *
@@ -31,6 +31,7 @@ const RULES: Rule[] = [
   // KEY=secret or KEY: secret for names that look sensitive; mask the value only.
   { label: 'secret assignment', re: /\b([A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|PASSWD|API[_-]?KEY|ACCESS[_-]?KEY|PRIVATE[_-]?KEY|CREDENTIAL)[A-Z0-9_]*)(\s*[:=]\s*)(?:"([^"]+)"|'([^']+)'|(\S+))/gi, group: 0 },
   { label: 'private key block', re: /-----BEGIN (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |PGP )?PRIVATE KEY-----/g },
+  { label: 'Groq API key', re: /gsk_[A-Za-z0-9]{20,}/g },
   { label: 'Anthropic API key', re: /sk-ant-[A-Za-z0-9_-]{8,}/g },
   { label: 'OpenAI API key', re: /sk-(?:proj-)?[A-Za-z0-9_-]{20,}/g },
   { label: 'AWS access key id', re: /\b(?:AKIA|ASIA|AGPA|AIDA|AROA)[A-Z0-9]{16}\b/g },

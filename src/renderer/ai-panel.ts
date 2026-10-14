@@ -1,5 +1,5 @@
 import type { RendererApi } from '../shared/ipc';
-import { AI_MODEL_LABELS, type AiStatus } from '../shared/ai';
+import { AI_MODEL_LABELS, AI_PROVIDER, type AiStatus } from '../shared/ai';
 import { redactSecrets, summarizeRedactions } from '../shared/redact';
 import { button, el } from './dom';
 
@@ -21,8 +21,8 @@ function previewOf(text: string): string {
 }
 
 /**
- * The "Explain terminal output with Claude" panel. Nothing is sent until the
- * user confirms a preview that shows exactly what will go to Anthropic, with
+ * The "Explain terminal output" panel. Nothing is sent until the
+ * user confirms a preview that shows exactly what will go to the provider (Groq), with
  * secrets masked by default. Sits behind the protection gate like the other
  * side panels.
  */
@@ -45,7 +45,7 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
 
   function renderStatus(s: AiStatus): void {
     status = s;
-    statusLine.textContent = s.key.present ? `Model: ${AI_MODEL_LABELS[s.model]}` : 'No API key set — add one in Settings (Ctrl+Shift+Comma) to use AI.';
+    statusLine.textContent = s.key.present ? `Model: ${AI_MODEL_LABELS[s.model]} (${AI_PROVIDER})` : 'No API key set — add one in Settings (Ctrl+Shift+Comma) to use AI.';
     statusLine.dataset.state = s.key.present ? 'ready' : 'unavailable';
   }
   api.ai.onStatus(renderStatus);
@@ -72,7 +72,7 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
     outputWrap.hidden = false;
     stopButton.hidden = false;
     streaming = true;
-    say('Asking Claude…');
+    say(`Asking ${AI_PROVIDER}…`);
     try {
       await api.ai.explain({ text, redact: prefs.redact, wantImage: prefs.wantImage });
     } catch (e) {
@@ -88,33 +88,28 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
 
     const redactBox = Object.assign(el('input'), { type: 'checkbox' });
     redactBox.checked = prefs.redact;
-    const imageBox = Object.assign(el('input'), { type: 'checkbox' });
-    imageBox.checked = prefs.wantImage;
     const skipBox = Object.assign(el('input'), { type: 'checkbox' });
 
     const previewPre = el('pre', { className: 'ai-preview', text: previewOf(shownText) });
     const summary = el('p', { className: 'field-note' });
     const refresh = () => {
       prefs.redact = redactBox.checked;
-      prefs.wantImage = imageBox.checked;
       const t = prefs.redact ? redacted : text;
       previewPre.textContent = previewOf(t);
-      summary.textContent = `${new TextEncoder().encode(t).length} bytes · ${prefs.redact ? summarizeRedactions(redactions) : 'Secrets NOT masked.'}${prefs.wantImage ? ' · plus an image of this window.' : ''}`;
+      summary.textContent = `${new TextEncoder().encode(t).length} bytes · ${prefs.redact ? summarizeRedactions(redactions) : 'Secrets NOT masked.'}`;
     };
     redactBox.addEventListener('change', refresh);
-    imageBox.addEventListener('change', refresh);
 
     confirm.replaceChildren(
-      el('p', { text: 'This will send the following terminal text to Anthropic:' }),
+      el('p', { text: `This will send the following terminal text to ${AI_PROVIDER}:` }),
       previewPre,
       summary,
       el('label', { className: 'lib-trash' }, redactBox, el('span', { text: 'Mask obvious secrets (recommended)' })),
-      el('label', { className: 'lib-trash' }, imageBox, el('span', { text: 'Also attach a picture of this window' })),
       el('label', { className: 'lib-trash' }, skipBox, el('span', { text: "Don't ask again this session" })),
       el(
         'div',
         { className: 'lib-actions' },
-        button('Send to Anthropic', () => {
+        button(`Send to ${AI_PROVIDER}`, () => {
           prefs.skipConfirm = skipBox.checked;
           void startStream(text);
         }),
@@ -145,7 +140,7 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
     if (!status?.key.present) {
       confirm.hidden = true;
       outputWrap.hidden = true;
-      say('No API key set. Open Settings (Ctrl+Shift+Comma) and add your Anthropic API key.');
+      say(`No API key set. Open Settings (Ctrl+Shift+Comma) and add your ${AI_PROVIDER} API key.`);
       return;
     }
     const { selection, viewport } = getText();
@@ -160,7 +155,7 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
   }
 
   panel.append(
-    el('div', { className: 'lib-head' }, el('strong', { text: 'Explain with Claude' }), stopButton, button('Close', () => close())),
+    el('div', { className: 'lib-head' }, el('strong', { text: `Explain with ${AI_PROVIDER}` }), stopButton, button('Close', () => close())),
     statusLine,
     message,
     confirm,

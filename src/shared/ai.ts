@@ -1,22 +1,25 @@
-export const AI_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5'] as const;
+// Groq (console.groq.com) — free, fast inference on open models.
+export const AI_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'] as const;
 export type AiModel = (typeof AI_MODELS)[number];
-export const DEFAULT_AI_MODEL: AiModel = 'claude-opus-5-5';
+export const DEFAULT_AI_MODEL: AiModel = 'llama-3.3-70b-versatile';
 
 export const AI_MODEL_LABELS: Record<AiModel, string> = {
-  'claude-opus-5-5': 'Claude Opus 5.5 (most capable)',
-  'claude-sonnet-5-5': 'Claude Sonnet 5.5 (faster, cheaper)',
-  'claude-haiku-4-5': 'Claude Haiku 4.5 (fastest, cheapest)',
+  'llama-3.3-70b-versatile': 'Llama 3.3 70B (most capable)',
+  'llama-3.1-8b-instant': 'Llama 3.1 8B (fastest)',
+  'openai/gpt-oss-120b': 'GPT-OSS 120B',
+  'openai/gpt-oss-20b': 'GPT-OSS 20B',
 };
+
+/** The provider name, shown in UI text ("send to …", "key stored …"). */
+export const AI_PROVIDER = 'Groq';
 
 export type KeySource = 'env' | 'keychain' | 'none';
 
 export interface KeyStatus {
   source: KeySource;
-  /** Whether a key is usable right now (env or decryptable keychain). */
   present: boolean;
-  /** True when the keychain is unavailable, so a pasted key cannot be saved. */
   keychainUnavailable: boolean;
-  /** Masked hint for the UI, e.g. "sk-ant-…4f2a"; never the whole key. */
+  /** Masked hint for the UI, e.g. "gsk_12…cdef"; never the whole key. */
   hint: string | null;
 }
 

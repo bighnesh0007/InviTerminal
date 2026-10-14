@@ -1,6 +1,6 @@
 import type { RendererApi } from '../shared/ipc';
 import { APP_ACTIONS, canonicalChord, chordFromEvent, keymapProblems, type AppAction, type Keymap } from '../shared/keymap';
-import { AI_MODEL_LABELS, AI_MODELS, type AiStatus } from '../shared/ai';
+import { AI_MODEL_LABELS, AI_MODELS, AI_PROVIDER, type AiStatus } from '../shared/ai';
 import type { SettingsPatch, SettingsView } from '../shared/settings';
 import { button, el } from './dom';
 
@@ -129,11 +129,11 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     if (st.key.source === 'env') {
       apiKey.disabled = true;
       apiKey.placeholder = `Set from the environment (${st.key.hint ?? ''})`;
-      aiKeyStatus.textContent = 'The API key comes from ANTHROPIC_API_KEY for this run; it is not editable here.';
+      aiKeyStatus.textContent = 'The API key comes from GROQ_API_KEY for this run; it is not editable here.';
     } else if (st.key.keychainUnavailable) {
       apiKey.disabled = true;
       apiKey.placeholder = 'No OS keychain available';
-      aiKeyStatus.textContent = 'No OS keychain is available, so a key cannot be stored. Use the ANTHROPIC_API_KEY environment variable.';
+      aiKeyStatus.textContent = 'No OS keychain is available, so a key cannot be stored. Use the GROQ_API_KEY environment variable.';
     } else {
       apiKey.disabled = false;
       apiKey.placeholder = 'sk-ant-…';
@@ -190,7 +190,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     field('Toggle window from anywhere', globalShortcut, el('span', { className: 'field-note', text: 'Applies after restart. On KDE it needs an installed .desktop file (packaged builds); until then bind `inviterminal --toggle` in System Settings.' })),
     el('h3', { text: 'AI assistant' }),
     field('Model', aiModel),
-    field('Anthropic API key', apiKey, aiKeyStatus),
+    field(`${AI_PROVIDER} API key`, apiKey, aiKeyStatus),
     el(
       'div',
       { className: 'lib-actions' },
@@ -213,7 +213,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
         say(r.detail);
       }, say),
     ),
-    el('span', { className: 'field-note', text: 'The key is stored encrypted in your OS keychain, never in settings.json, and is sent only to Anthropic when you use the AI features.' }),
+    el('span', { className: 'field-note', text: `The key is stored encrypted in your OS keychain, never in settings.json, and is sent only to ${AI_PROVIDER} when you use the AI features. Get a free key at console.groq.com.` }),
     el('h3', { text: 'Speech-to-text (local whisper.cpp)' }),
     field('Whisper model path', sttModel, sttStatus),
     el('span', { className: 'field-note', text: 'Transcription runs on your machine with whisper-cli; audio is never uploaded. Download a ggml model (e.g. ggml-base.en.bin) and point this at it.' }),

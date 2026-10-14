@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { AiModel, AiStatus } from '../../shared/ai';
 import { IPC } from '../../shared/ipc';
 import { isFromWindow } from '../ipc-guard';
-import type { AnthropicClient } from './AnthropicClient';
+import type { GroqClient } from './GroqClient';
 import type { KeyStore } from './key-store';
 
 const SetKeyRequest = z.object({ key: z.string().min(1).max(500) }).strict();
@@ -12,7 +12,7 @@ const SetKeyRequest = z.object({ key: z.string().min(1).max(500) }).strict();
  * AI IPC. The key crosses the boundary exactly once (renderer → main, on
  * aiSetKey) and is never sent back; status carries only a masked hint.
  */
-export function registerAiIpc(getWin: () => BrowserWindow | null, keyStore: KeyStore, client: AnthropicClient, getModel: () => AiModel): void {
+export function registerAiIpc(getWin: () => BrowserWindow | null, keyStore: KeyStore, client: GroqClient, getModel: () => AiModel): void {
   const guard = (e: Electron.IpcMainInvokeEvent) => {
     if (!isFromWindow(e, getWin())) throw new Error('IPC from unexpected sender');
   };

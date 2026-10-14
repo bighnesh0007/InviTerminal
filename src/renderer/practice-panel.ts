@@ -1,6 +1,7 @@
 import type { RendererApi } from '../shared/ipc';
 import type { AiStatus } from '../shared/ai';
 import type { SttStatus } from '../shared/audio';
+import { AI_PROVIDER } from '../shared/ai';
 import { button, el } from './dom';
 import { createMicRecorder, type MicRecorder } from './mic-recorder';
 
@@ -14,9 +15,9 @@ export interface PracticePanelView {
 const PRESETS = ['System design', 'Behavioral / STAR', 'JavaScript & the browser', 'Data structures & algorithms'];
 
 /**
- * Interview practice (7e): Claude interviews the user one question at a time;
+ * Interview practice (7e): the model interviews the user one question at a time;
  * the user answers out loud (recorded + transcribed locally via 7d) or by
- * typing, and Claude gives feedback and the next question. Behind the gate.
+ * typing, and the model gives feedback and the next question. Behind the gate.
  */
 export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: boolean): void }): PracticePanelView {
   const panel = el('aside', { className: 'library practice-panel' });
@@ -86,7 +87,7 @@ export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: 
 
   async function startInterview(): Promise<void> {
     if (!aiReady) {
-      say('Add your Anthropic API key in Settings first.');
+      say(`Add your ${AI_PROVIDER} API key in Settings first.`);
       return;
     }
     if (!topic.value.trim()) {

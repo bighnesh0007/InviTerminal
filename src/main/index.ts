@@ -26,7 +26,7 @@ import { AudioController } from './audio/AudioController';
 import { registerAudioIpc } from './audio/register';
 import { WhisperStt } from './audio/WhisperStt';
 import { registerSttIpc } from './audio/stt-register';
-import { AnthropicClient } from './ai/AnthropicClient';
+import { GroqClient } from './ai/GroqClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
 import { type ExplainStreamer, registerExplainIpc } from './ai/explain';
@@ -198,12 +198,12 @@ app.whenReady().then(async () => {
 
   // AI: the key lives in the OS keychain (safeStorage), never in settings.json or the renderer.
   const keyStore = new KeyStore(app.getPath('userData'), safeStorage, process.env);
-  const anthropic = new AnthropicClient(() => keyStore.getKey());
-  registerAiIpc(() => mainWin, keyStore, anthropic, () => settings.effective().ai.model);
+  const groq = new GroqClient(() => keyStore.getKey());
+  registerAiIpc(() => mainWin, keyStore, groq, () => settings.effective().ai.model);
   // Autotests stub the model so the explain flow is verifiable without a key or network.
-  const explainStreamer: ExplainStreamer = autotest !== 'off' ? stubExplainStreamer : (opts, onDelta, signal) => anthropic.explainStream(opts, onDelta, signal);
+  const explainStreamer: ExplainStreamer = autotest !== 'off' ? stubExplainStreamer : (opts, onDelta, signal) => groq.explainStream(opts, onDelta, signal);
   registerExplainIpc(() => mainWin, explainStreamer, () => settings.effective().ai.model);
-  const chatStreamer: ChatStreamer = autotest !== 'off' ? stubChatStreamer : (opts, onDelta, signal) => anthropic.chatStream(opts, onDelta, signal);
+  const chatStreamer: ChatStreamer = autotest !== 'off' ? stubChatStreamer : (opts, onDelta, signal) => groq.chatStream(opts, onDelta, signal);
   registerPracticeIpc(() => mainWin, chatStreamer, () => settings.effective().ai.model);
 
   // Settings: applied live where possible; startup-only values are flagged as needing a restart.
@@ -354,7 +354,7 @@ async function pingRealMongo(uri: string): Promise<void> {
 const stubExplainStreamer: ExplainStreamer = async (opts, onDelta, signal) => {
   // Observability for the ai-explain autotest: did the text the model would receive still
   // carry the planted canary? (It must not, after authoritative redaction.)
-  console.log(`[autotest] ${JSON.stringify({ event: 'stub-received', hasCanary: opts.text.includes('sk-ant-autotest'), hasImage: !!opts.imageBase64, lines: opts.text.split(String.fromCharCode(10)).length })}`);
+  console.log(`[autotest] ${JSON.stringify({ event: 'stub-received', hasCanary: opts.text.includes('gsk_autotest'), hasImage: !!opts.imageBase64, lines: opts.text.split(String.fromCharCode(10)).length })}`);
   const parts = [`[stub ${opts.model}] `, 'Explanation of ', `${opts.text.split(String.fromCharCode(10)).length} line(s)`, opts.imageBase64 ? ' with an image.' : '.'];
   let full = '';
   for (const p of parts) {

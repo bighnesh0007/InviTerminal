@@ -19,8 +19,8 @@ function mask(key: string): string {
 }
 
 /**
- * Stores the user's Anthropic API key. An environment variable
- * (ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN), if set, always wins and is never
+ * Stores the user's Groq API key. An environment variable
+ * (GROQ_API_KEY), if set, always wins and is never
  * persisted. A pasted key is encrypted at rest with the OS keychain via
  * safeStorage and written 0600; it is never put in settings.json, never logged,
  * and never sent to the renderer — only getKey() (main process) returns it.
@@ -39,7 +39,7 @@ export class KeyStore {
   }
 
   private envKey(): string | undefined {
-    const v = this.env.ANTHROPIC_API_KEY ?? this.env.ANTHROPIC_AUTH_TOKEN;
+    const v = this.env.GROQ_API_KEY;
     return v && v.trim().length >= MIN_KEY_LEN ? v.trim() : undefined;
   }
 
@@ -76,10 +76,10 @@ export class KeyStore {
 
   /** Encrypt-and-save a pasted key. Rejects if the keychain is unavailable or the key is set via env. */
   async setKey(plain: string): Promise<void> {
-    if (this.envKey()) throw new Error('A key is already set from the environment; unset ANTHROPIC_API_KEY to store one here.');
+    if (this.envKey()) throw new Error('A key is already set from the environment; unset GROQ_API_KEY to store one here.');
     const key = plain.trim();
     if (key.length < MIN_KEY_LEN) throw new Error('That key looks too short.');
-    if (!this.safeStorage.isEncryptionAvailable()) throw new Error('No OS keychain is available to encrypt the key, so it cannot be stored. Use the ANTHROPIC_API_KEY environment variable instead.');
+    if (!this.safeStorage.isEncryptionAvailable()) throw new Error('No OS keychain is available to encrypt the key, so it cannot be stored. Use the GROQ_API_KEY environment variable instead.');
     const enc = this.safeStorage.encryptString(key);
     const tmp = join(this.dir, `.${FILE}.${randomBytes(4).toString('hex')}.tmp`);
     await writeFile(tmp, enc, { mode: 0o600 });

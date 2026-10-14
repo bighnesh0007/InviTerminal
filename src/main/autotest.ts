@@ -600,7 +600,7 @@ export async function settingsReadbackAutotest(win: BrowserWindow, tap: Terminal
 export async function aiKeyAutotest(win: BrowserWindow, settingsFile: string, userDataDir: string): Promise<void> {
   const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
   const keyFile = join(userDataDir, 'ai-key.enc');
-  const FAKE = 'sk-ant-fake-key-for-autotest-0123456789';
+  const FAKE = 'gsk_fakeKeyForAutotest0123456789abcdef';
   try {
     const { safeStorage } = await import('electron');
     log('safeStorage', { encryptionAvailable: safeStorage.isEncryptionAvailable() });
@@ -638,7 +638,7 @@ export async function aiExplainAutotest(win: BrowserWindow, manager: PtyManager,
   const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
   const clickIn = (scope: string, text: string) =>
     js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
-  const canary = `sk-ant-autotest${randomBytes(6).toString('hex')}`;
+  const canary = `gsk_autotest${randomBytes(10).toString('hex')}`;
   try {
     const first = await until('shell', () => tap.spawned[0], 10_000);
     await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
@@ -653,7 +653,7 @@ export async function aiExplainAutotest(win: BrowserWindow, manager: PtyManager,
     await clickIn('.ai-panel', 'Close');
 
     // Set a fake key so the panel will offer to send (the stub never calls the network).
-    await js(`window.inviterminal.ai.setKey('sk-ant-fake-explain-autotest-0123456789')`);
+    await js(`window.inviterminal.ai.setKey('gsk_fakeExplainAutotest0123456789abcd')`);
     await sleep(300);
 
     // Put a secret-looking line on screen (used via the viewport fallback — no selection).
@@ -677,7 +677,7 @@ export async function aiExplainAutotest(win: BrowserWindow, manager: PtyManager,
     log('redact-toggle', { withRedactOff_previewHasCanary: previewAfterToggle });
 
     // Send (redaction on). The stub logs whether main handed it the canary.
-    await clickIn('.ai-confirm', 'Send to Anthropic');
+    await clickIn('.ai-confirm', 'Send to Groq');
     await until('stream done', () => js<string>(`document.querySelector('.ai-panel .lib-message').textContent`).then((t) => t === 'Done.' || t.startsWith('Error')), 10_000);
     const out = await js<string>(`document.querySelector('.ai-output').textContent`);
     log('sent-redacted', { outputHasStub: out.includes('[stub'), outputHasCanary: out.includes(canary) });
@@ -798,7 +798,7 @@ export async function practiceAutotest(win: BrowserWindow, controller: Protectio
     await until('renderer', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
     await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
 
-    await js(`window.inviterminal.ai.setKey('sk-ant-fake-practice-autotest-0123456789')`);
+    await js(`window.inviterminal.ai.setKey('gsk_fakePracticeAutotest0123456789abc')`);
     await sleep(300);
     await clickIn('header', 'Practice');
     await sleep(200);

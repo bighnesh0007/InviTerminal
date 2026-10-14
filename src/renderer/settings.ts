@@ -15,6 +15,7 @@ const ACTION_LABELS: Record<AppAction, string> = {
   panicHide: 'Hide now (panic)',
   toggleLibrary: 'Snippet library',
   openSettings: 'Settings',
+  explainSelection: 'Explain selection with AI',
   newTab: 'New tab',
   closeTab: 'Close tab',
   nextTab: 'Next tab',

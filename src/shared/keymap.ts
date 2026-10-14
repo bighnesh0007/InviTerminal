@@ -4,7 +4,7 @@
  * keyboard layout.
  */
 
-export const APP_ACTIONS = ['panicHide', 'toggleLibrary', 'openSettings', 'newTab', 'closeTab', 'nextTab', 'prevTab'] as const;
+export const APP_ACTIONS = ['panicHide', 'toggleLibrary', 'openSettings', 'explainSelection', 'newTab', 'closeTab', 'nextTab', 'prevTab'] as const;
 export type AppAction = (typeof APP_ACTIONS)[number];
 export type Keymap = Record<AppAction, string>;
 
@@ -12,6 +12,7 @@ export const DEFAULT_KEYMAP: Keymap = {
   panicHide: 'Ctrl+Shift+H',
   toggleLibrary: 'Ctrl+Shift+L',
   openSettings: 'Ctrl+Shift+Comma',
+  explainSelection: 'Ctrl+Shift+E',
   newTab: 'Ctrl+Shift+T',
   closeTab: 'Ctrl+Shift+W',
   nextTab: 'Ctrl+PageDown',

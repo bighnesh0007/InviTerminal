@@ -1,6 +1,6 @@
 ---
 type: decision-record
-status: decisions made (§7); step 7a (key store) built and verified; 7b next
+status: 7a + 7b (explain feature) built and verified; 7c (audio) next
 verified-on: 2026-10-14
 ---
 
@@ -276,6 +276,39 @@ setting round-trips and rejects unknown models; 158 tests total; `npm audit --om
 pasted key stored encrypted at `0600`, absent from `settings.json`, masked in the hint,
 removed on clear. **Not verified:** a real `testKey()` network call — no API key in this
 environment.
+
+## 7b — Done (2026-10-14): explain terminal output with Claude
+
+Built and verified:
+- **Redactor** (`src/shared/redact.ts`): masks private-key blocks, Anthropic/OpenAI/AWS/
+  GitHub/Google/Slack tokens, JWTs, bearer tokens, URL credentials, and `NAME=secret`
+  assignments (value only, name kept). Shared so the renderer previews exactly what the
+  main process will send; **main re-applies it authoritatively** (never trusts the renderer).
+- **Explain pipeline** (`src/main/ai/explain.ts`): one request in flight, abortable,
+  streamed over IPC; the image (optional) is captured by main via `capturePage()` of our
+  own window — works while capture-excluded. Long selections clamped to the last 400 lines.
+- **AI panel** (`src/renderer/ai-panel.ts`): Explain button + `Ctrl+Shift+E`. A
+  **confirm-preview** shows the exact (redacted) text, byte count, and a secret summary;
+  checkboxes for mask-secrets (on), attach-image (off), and don't-ask-again-this-session.
+  Streams the answer; Stop aborts. Behind the protection gate, like the other panels.
+  Uses the selection, or the visible viewport when nothing is selected.
+
+Verified: 9 redactor unit tests + mutation checks (drop a rule → caught; over-mask `HOME`
+→ caught); 167 tests total; `npm audit --omit=dev` 0; capture + tabs-settings regressions
+pass. **Live (`INVI_AUTOTEST=ai-explain`, stub model, no network/key):** no-key state sends
+nothing; the confirm-preview masks a planted `sk-ant-…` canary (summary "2 secrets masked");
+**nothing is sent before confirm** (output empty at confirm); turning redaction off reveals
+the canary (positive control); after Send, the **model received text with the canary
+stripped** (`stub-received hasCanary:false`) while the terminal still shows the real key —
+screenshots in `docs/`. **Not verified:** a real streamed answer from Anthropic (no key).
+
+### Honest limitation surfaced by testing
+The redactor only masks **known shapes**. A secret with no recognizable shape passed as a
+bare argument (e.g. a random string that is not `KEY=value` and matches no token pattern)
+is **not** masked. That is why the confirm-preview exists — the user sees exactly what will
+be sent — and why the UI calls the redactor "best-effort, not a guarantee". The first
+autotest canary was shapeless and (correctly) not masked; it was changed to a shaped secret
+to assert authoritative redaction.
 
 ## 7. Decisions (made 2026-10-14)
 

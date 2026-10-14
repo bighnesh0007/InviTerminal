@@ -19,6 +19,10 @@ export interface TerminalView {
   /** Re-measure after the container changes size or becomes visible. */
   fit(): void;
   setOptions(o: TerminalOptions): void;
+  /** The current selection, or '' if nothing is selected. */
+  getSelectionText(): string;
+  /** The visible viewport as text (fallback when there is no selection). */
+  getViewportText(): string;
   /** Kills the shell and releases the terminal (tab closed). */
   dispose(): void;
   readonly session: TermSession | null;
@@ -156,6 +160,14 @@ export function mountTerminal(container: HTMLElement, api: RendererApi, opts: Mo
       term.options.fontSize = o.fontSize;
       term.options.scrollback = o.scrollback;
       fit();
+    },
+    getSelectionText: () => term.getSelection(),
+    getViewportText: () => {
+      const buf = term.buffer.active;
+      const top = buf.viewportY;
+      const lines: string[] = [];
+      for (let y = top; y < top + term.rows; y++) lines.push(buf.getLine(y)?.translateToString(true) ?? '');
+      return lines.join('\n').replace(/\n+$/, '');
     },
     dispose() {
       disposed = true;

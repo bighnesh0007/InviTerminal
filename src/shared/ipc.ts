@@ -57,6 +57,16 @@ export const IPC = {
   aiTestKey: 'ai:test-key',
   /** main → renderer */
   aiStatusChanged: 'ai:status-changed',
+  aiExplainStart: 'ai:explain-start',
+  aiExplainCancel: 'ai:explain-cancel',
+  /** main → renderer */
+  aiExplainDelta: 'ai:explain-delta',
+  /** main → renderer */
+  aiExplainDone: 'ai:explain-done',
+  /** main → renderer */
+  aiExplainError: 'ai:explain-error',
+  /** main → renderer */
+  aiExplainCancelled: 'ai:explain-cancelled',
 } as const;
 
 export interface ConcealRequest {
@@ -150,5 +160,12 @@ export interface RendererApi {
     setKey(key: string): Promise<string | null>;
     clearKey(): Promise<void>;
     testKey(): Promise<{ ok: boolean; detail: string }>;
+    /** Start an explanation of `text`. Results arrive via the on* callbacks. */
+    explain(req: { text: string; redact: boolean; wantImage: boolean }): Promise<void>;
+    cancelExplain(): void;
+    onExplainDelta(cb: (chunk: string) => void): void;
+    onExplainDone(cb: (full: string) => void): void;
+    onExplainError(cb: (message: string) => void): void;
+    onExplainCancelled(cb: (message: string) => void): void;
   };
 }

@@ -106,3 +106,12 @@ textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; 
 .field-note { font-size: 11px; color: var(--muted); }
 .chord-input { cursor: pointer; font-family: ui-monospace, monospace; }
 .chord-input:focus { outline: 1px solid var(--warn); }
+/* ---- AI panel ------------------------------------------------------------------------ */
+.ai-panel { display: flex; flex-direction: column; }
+.ai-output-wrap { flex: 1; min-height: 0; overflow: auto; background: var(--bg); border-radius: 6px; padding: 8px; }
+.ai-output-wrap[hidden] { display: none; }
+.ai-output { margin: 0; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, monospace; font-size: 12px; }
+.ai-confirm { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--warn); border-radius: 6px; padding: 8px; background: #241c0e; }
+.ai-confirm[hidden] { display: none; }
+.ai-confirm p { margin: 0; font-size: 13px; }
+.ai-preview { max-height: 220px; overflow: auto; margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; background: var(--bg); padding: 6px; border-radius: 6px; }

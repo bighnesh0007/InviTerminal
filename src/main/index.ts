@@ -5,7 +5,7 @@ import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'n
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { aiKeyAutotest, captureAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { aiExplainAutotest, aiKeyAutotest, captureAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -24,6 +24,7 @@ import { registerVisibility } from './visibility/register';
 import { AnthropicClient } from './ai/AnthropicClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
+import { type ExplainStreamer, registerExplainIpc } from './ai/explain';
 import { LibraryService } from './library/LibraryService';
 import { registerLibraryIpc } from './library/register';
 import { isProductionBuild } from './build-mode';
@@ -152,7 +153,7 @@ app.whenReady().then(async () => {
   const env = classifyEnvironment(process.platform, sessionEnv);
   const provider = env.kind === 'kwin-wayland' ? createKwinProvider() : createUnsupportedProvider(env.reason);
 
-  const tap = ['terminal', 'ui-snapshot', 'visibility', 'library', 'tabs-settings', 'settings-readback'].includes(autotest) ? createTerminalTap() : null;
+  const tap = ['terminal', 'ui-snapshot', 'visibility', 'library', 'tabs-settings', 'settings-readback', 'ai-explain'].includes(autotest) ? createTerminalTap() : null;
   const manager = createPtyManager(tap);
   if (tap) {
     const spawn = manager.spawn.bind(manager);
@@ -183,6 +184,9 @@ app.whenReady().then(async () => {
   const keyStore = new KeyStore(app.getPath('userData'), safeStorage, process.env);
   const anthropic = new AnthropicClient(() => keyStore.getKey());
   registerAiIpc(() => mainWin, keyStore, anthropic, () => settings.effective().ai.model);
+  // Autotests stub the model so the explain flow is verifiable without a key or network.
+  const explainStreamer: ExplainStreamer = autotest !== 'off' ? stubExplainStreamer : (opts, onDelta, signal) => anthropic.explainStream(opts, onDelta, signal);
+  registerExplainIpc(() => mainWin, explainStreamer, () => settings.effective().ai.model);
 
   // Settings: applied live where possible; startup-only values are flagged as needing a restart.
   settings.onChange((v) => {
@@ -244,6 +248,7 @@ app.whenReady().then(async () => {
     if (first && tap && autotest === 'tabs-settings') void done.then(() => tabsSettingsAutotest(win, tap, controller, settings.path));
     if (first && tap && autotest === 'settings-readback') void done.then(() => settingsReadbackAutotest(win, tap, () => settings.view()));
     if (first && autotest === 'ai-key') void done.then(() => aiKeyAutotest(win, settings.path, app.getPath('userData')));
+    if (first && tap && autotest === 'ai-explain') void done.then(() => aiExplainAutotest(win, manager, tap, controller));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {
@@ -310,5 +315,21 @@ async function pingRealMongo(uri: string): Promise<void> {
     console.log(`[autotest] ${JSON.stringify({ event: 'real-mongo-ping', ok: false, error: (e as Error).message })}`);
   }
 }
+
+/** Deterministic fake model for autotests: echoes a summary of what it was asked to explain. */
+const stubExplainStreamer: ExplainStreamer = async (opts, onDelta, signal) => {
+  // Observability for the ai-explain autotest: did the text the model would receive still
+  // carry the planted canary? (It must not, after authoritative redaction.)
+  console.log(`[autotest] ${JSON.stringify({ event: 'stub-received', hasCanary: opts.text.includes('sk-ant-autotest'), hasImage: !!opts.imageBase64, lines: opts.text.split(String.fromCharCode(10)).length })}`);
+  const parts = [`[stub ${opts.model}] `, 'Explanation of ', `${opts.text.split(String.fromCharCode(10)).length} line(s)`, opts.imageBase64 ? ' with an image.' : '.'];
+  let full = '';
+  for (const p of parts) {
+    if (signal.aborted) throw new Error('aborted');
+    onDelta(p);
+    full += p;
+    await new Promise((r) => setTimeout(r, 30));
+  }
+  return full;
+};
 
 app.on('window-all-closed', () => app.quit());

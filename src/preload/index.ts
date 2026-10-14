@@ -82,6 +82,20 @@ const api: RendererApi = {
     setKey: (key) => ipcRenderer.invoke(IPC.aiSetKey, { key }),
     clearKey: () => ipcRenderer.invoke(IPC.aiClearKey),
     testKey: () => ipcRenderer.invoke(IPC.aiTestKey),
+    explain: (req) => ipcRenderer.invoke(IPC.aiExplainStart, req),
+    cancelExplain: () => ipcRenderer.send(IPC.aiExplainCancel),
+    onExplainDelta: (cb) => {
+      ipcRenderer.on(IPC.aiExplainDelta, (_e, chunk: string) => cb(chunk));
+    },
+    onExplainDone: (cb) => {
+      ipcRenderer.on(IPC.aiExplainDone, (_e, full: string) => cb(full));
+    },
+    onExplainError: (cb) => {
+      ipcRenderer.on(IPC.aiExplainError, (_e, m: string) => cb(m));
+    },
+    onExplainCancelled: (cb) => {
+      ipcRenderer.on(IPC.aiExplainCancelled, (_e, m: string) => cb(m));
+    },
   },
 };
 

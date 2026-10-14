@@ -631,3 +631,62 @@ export async function aiKeyAutotest(win: BrowserWindow, settingsFile: string, us
   }
   win.close();
 }
+
+/** Phase 7b: the explain flow through the real renderer with the stub model (no network, no key). */
+export async function aiExplainAutotest(win: BrowserWindow, manager: PtyManager, tap: TerminalTap, controller: ProtectionController): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  const clickIn = (scope: string, text: string) =>
+    js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
+  const canary = `sk-ant-autotest${randomBytes(6).toString('hex')}`;
+  try {
+    const first = await until('shell', () => tap.spawned[0], 10_000);
+    await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
+    win.focus();
+    await sleep(400);
+
+    // No key yet: Explain should say so and send nothing.
+    await clickIn('header', 'Explain');
+    await sleep(300);
+    const noKeyMsg = await js<string>(`document.querySelector('.ai-panel .lib-message').textContent`);
+    log('no-key', { message: noKeyMsg, confirmShown: await js<boolean>(`!document.querySelector('.ai-confirm').hidden`) });
+    await clickIn('.ai-panel', 'Close');
+
+    // Set a fake key so the panel will offer to send (the stub never calls the network).
+    await js(`window.inviterminal.ai.setKey('sk-ant-fake-explain-autotest-0123456789')`);
+    await sleep(300);
+
+    // Put a secret-looking line on screen (used via the viewport fallback — no selection).
+    manager.input(first.sessionId, `printf '%s\\n' ${canary}\r`);
+    await until('canary on screen', () => (tap.output.get(first.sessionId) ?? []).join('').includes(canary) || undefined, 5000);
+    await sleep(300);
+
+    await clickIn('header', 'Explain');
+    await sleep(400);
+    const beforeSend = {
+      confirmShown: await js<boolean>(`!document.querySelector('.ai-confirm').hidden`),
+      previewHasCanary: await js<boolean>(`document.querySelector('.ai-preview').textContent.includes(${JSON.stringify(canary)})`),
+      outputEmpty: await js<string>(`document.querySelector('.ai-output').textContent`).then((t) => t === ''),
+      summary: await js<string>(`document.querySelector('.ai-confirm .field-note').textContent`),
+    };
+    log('confirm', beforeSend);
+
+    // Toggle redaction off → the preview reveals the canary (proves the toggle works), then back on.
+    const previewAfterToggle = await js<boolean>(`(() => { const cb = document.querySelector('.ai-confirm input[type=checkbox]'); cb.checked = false; cb.dispatchEvent(new Event('change')); return document.querySelector('.ai-preview').textContent.includes(${JSON.stringify(canary)}); })()`);
+    await js(`(() => { const cb = document.querySelector('.ai-confirm input[type=checkbox]'); cb.checked = true; cb.dispatchEvent(new Event('change')); })()`);
+    log('redact-toggle', { withRedactOff_previewHasCanary: previewAfterToggle });
+
+    // Send (redaction on). The stub logs whether main handed it the canary.
+    await clickIn('.ai-confirm', 'Send to Anthropic');
+    await until('stream done', () => js<string>(`document.querySelector('.ai-panel .lib-message').textContent`).then((t) => t === 'Done.' || t.startsWith('Error')), 10_000);
+    const out = await js<string>(`document.querySelector('.ai-output').textContent`);
+    log('sent-redacted', { outputHasStub: out.includes('[stub'), outputHasCanary: out.includes(canary) });
+    await sleep(400);
+    if (process.env.INVI_SNAPSHOT_PATH) {
+      await writeFile(process.env.INVI_SNAPSHOT_PATH, (await win.webContents.capturePage()).toPNG());
+      log('snapshot', { path: process.env.INVI_SNAPSHOT_PATH });
+    }
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}

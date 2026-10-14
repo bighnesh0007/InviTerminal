@@ -6,6 +6,7 @@ import { button as makeButton, el } from './dom';
 import { mountLibrary } from './library';
 import { actionForEvent, canonicalChord, DEFAULT_KEYMAP, type AppAction, type Keymap } from '../shared/keymap';
 import { DEFAULT_SETTINGS, type SettingsView } from '../shared/settings';
+import { mountAiPanel } from './ai-panel';
 import { mountSettings } from './settings';
 import { mountTabs } from './tabs';
 
@@ -108,7 +109,7 @@ function renderMain(): void {
   termWrap.prepend(tabs.bar);
 
   const panelChanged = () => {
-    const anyOpen = library.isOpen() || settingsPanel.isOpen();
+    const anyOpen = library.isOpen() || settingsPanel.isOpen() || aiPanel.isOpen();
     termWrap.classList.toggle('lib-open', anyOpen);
     requestAnimationFrame(() => {
       tabs.fit();
@@ -130,10 +131,23 @@ function renderMain(): void {
   const settingsPanel = mountSettings(api, {
     onOpenChange: (open) => {
       if (open && library.isOpen()) library.toggle();
+      if (open) aiPanel.close();
       panelChanged();
     },
   });
-  termWrap.append(library.element, settingsPanel.element);
+  const aiPanel = mountAiPanel(api, {
+    onOpenChange: (open) => {
+      if (open && library.isOpen()) library.toggle();
+      if (open) settingsPanel.close();
+      panelChanged();
+    },
+  });
+  const explainSelection = () =>
+    aiPanel.request(() => {
+      const v = tabs.active();
+      return { selection: v?.getSelectionText() ?? '', viewport: v?.getViewportText() ?? '' };
+    });
+  termWrap.append(library.element, settingsPanel.element, aiPanel.element);
 
   gate.append(
     button('Show anyway', () => {
@@ -155,6 +169,7 @@ function renderMain(): void {
     termHost.classList.toggle('concealed', !show);
     library.element.classList.toggle('concealed', !show);
     settingsPanel.element.classList.toggle('concealed', !show);
+    aiPanel.element.classList.toggle('concealed', !show);
     tabs.bar.classList.toggle('concealed', !show);
     // Nothing behind the cover may keep keyboard focus (e.g. the snippet search box).
     if (!show && document.activeElement instanceof HTMLElement && termWrap.contains(document.activeElement)) document.activeElement.blur();
@@ -233,8 +248,9 @@ function renderMain(): void {
 
   const hideButton = button('Hide', () => api.visibility.panicHide());
   const libraryButton = button('Snippets', () => library.toggle());
+  const explainButton = button('Explain', () => explainSelection());
   const settingsButton = button('Settings', () => settingsPanel.toggle());
-  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), libraryButton, settingsButton, hideButton, drawerToggle), drawer, termWrap);
+  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), explainButton, libraryButton, settingsButton, hideButton, drawerToggle), drawer, termWrap);
 
   // Button tooltips show the current shortcuts.
   const showChords = () => {
@@ -267,6 +283,7 @@ function renderMain(): void {
     panicHide: () => api.visibility.panicHide(),
     toggleLibrary: () => library.toggle(),
     openSettings: () => settingsPanel.toggle(),
+    explainSelection: () => explainSelection(),
     newTab: () => tabs.newTab(),
     closeTab: () => tabs.closeActive(),
     nextTab: () => tabs.next(),

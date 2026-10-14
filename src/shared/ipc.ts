@@ -1,5 +1,6 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
+import type { AiStatus } from './ai';
 import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
 
@@ -50,6 +51,12 @@ export const IPC = {
   settingsUpdate: 'settings:update',
   /** main → renderer */
   settingsChanged: 'settings:changed',
+  aiStatus: 'ai:status',
+  aiSetKey: 'ai:set-key',
+  aiClearKey: 'ai:clear-key',
+  aiTestKey: 'ai:test-key',
+  /** main → renderer */
+  aiStatusChanged: 'ai:status-changed',
 } as const;
 
 export interface ConcealRequest {
@@ -135,5 +142,13 @@ export interface RendererApi {
     get(): Promise<SettingsView>;
     update(patch: SettingsPatch): Promise<SettingsView>;
     onChange(cb: (v: SettingsView) => void): void;
+  };
+  ai: {
+    status(): Promise<AiStatus>;
+    onStatus(cb: (s: AiStatus) => void): void;
+    /** Returns null on success, or an error message. The key is sent once over IPC and never read back. */
+    setKey(key: string): Promise<string | null>;
+    clearKey(): Promise<void>;
+    testKey(): Promise<{ ok: boolean; detail: string }>;
   };
 }

@@ -1,5 +1,6 @@
 import type { RendererApi } from '../shared/ipc';
 import { APP_ACTIONS, canonicalChord, chordFromEvent, keymapProblems, type AppAction, type Keymap } from '../shared/keymap';
+import { AI_MODEL_LABELS, AI_MODELS, type AiStatus } from '../shared/ai';
 import type { SettingsPatch, SettingsView } from '../shared/settings';
 import { button, el } from './dom';
 
@@ -42,6 +43,12 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   globalShortcut.placeholder = 'e.g. Control+Alt+T (empty = none)';
   const chordInputs = {} as Record<AppAction, HTMLInputElement>;
   const chordErrors = {} as Record<AppAction, HTMLSpanElement>;
+
+  const aiModel = el('select');
+  for (const m of AI_MODELS) aiModel.append(Object.assign(el('option', { text: AI_MODEL_LABELS[m] }), { value: m }));
+  const apiKey = Object.assign(el('input'), { type: 'password', autocomplete: 'off', placeholder: 'sk-ant-…' });
+  apiKey.spellcheck = false;
+  const aiKeyStatus = el('span', { className: 'field-note' });
 
   const field = (label: string, input: HTMLElement, note?: HTMLElement) => el('label', { className: 'lib-field' }, el('span', { text: label }), input, ...(note ? [note] : []));
 
@@ -96,6 +103,8 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     mongoUri.value = s.library.mongoUri;
     allowRemote.checked = s.library.allowRemote;
     globalShortcut.value = s.globalShortcut ?? '';
+    aiModel.value = s.ai.model;
+    renderAiStatus(await api.ai.status());
     for (const a of APP_ACTIONS) chordInputs[a].value = canonicalChord(s.shortcuts[a]) ?? s.shortcuts[a];
     for (const [input, path] of [[mongoUri, 'library.mongoUri'], [allowRemote, 'library.allowRemote'], [globalShortcut, 'globalShortcut']] as const) {
       input.disabled = view.overriddenByEnv.includes(path);
@@ -104,6 +113,25 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     renderBanner();
     validateChords();
   }
+
+  function renderAiStatus(st: AiStatus): void {
+    aiModel.value = st.model;
+    apiKey.value = '';
+    if (st.key.source === 'env') {
+      apiKey.disabled = true;
+      apiKey.placeholder = `Set from the environment (${st.key.hint ?? ''})`;
+      aiKeyStatus.textContent = 'The API key comes from ANTHROPIC_API_KEY for this run; it is not editable here.';
+    } else if (st.key.keychainUnavailable) {
+      apiKey.disabled = true;
+      apiKey.placeholder = 'No OS keychain available';
+      aiKeyStatus.textContent = 'No OS keychain is available, so a key cannot be stored. Use the ANTHROPIC_API_KEY environment variable.';
+    } else {
+      apiKey.disabled = false;
+      apiKey.placeholder = 'sk-ant-…';
+      aiKeyStatus.textContent = st.key.present ? `A key is stored in your OS keychain (${st.key.hint}).` : 'No key stored. Paste one and click Save key.';
+    }
+  }
+  api.ai.onStatus(renderAiStatus);
 
   function renderBanner(): void {
     if (!view) return;
@@ -127,6 +155,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     if (!view.overriddenByEnv.includes('library.allowRemote') && allowRemote.checked !== s.library.allowRemote) patch.library = { ...patch.library, allowRemote: allowRemote.checked };
     const gs = globalShortcut.value.trim() || null;
     if (!view.overriddenByEnv.includes('globalShortcut') && gs !== s.globalShortcut) patch.globalShortcut = gs;
+    if (aiModel.value !== s.ai.model) patch.ai = { model: aiModel.value as (typeof AI_MODELS)[number] };
     view = await api.settings.update(patch);
     // Leave any shortcut field, so the next key press acts instead of being recorded.
     if (document.activeElement instanceof HTMLElement && panel.contains(document.activeElement)) document.activeElement.blur();
@@ -148,6 +177,32 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     el('label', { className: 'lib-trash' }, allowRemote, el('span', { text: 'Allow a non-local MongoDB (snippets leave this machine)' })),
     el('h3', { text: 'Global shortcut (portal)' }),
     field('Toggle window from anywhere', globalShortcut, el('span', { className: 'field-note', text: 'Applies after restart. On KDE it needs an installed .desktop file (packaged builds); until then bind `inviterminal --toggle` in System Settings.' })),
+    el('h3', { text: 'AI assistant' }),
+    field('Model', aiModel),
+    field('Anthropic API key', apiKey, aiKeyStatus),
+    el(
+      'div',
+      { className: 'lib-actions' },
+      button('Save key', async () => {
+        const err = await api.ai.setKey(apiKey.value);
+        if (err) {
+          say(err);
+        } else {
+          apiKey.value = '';
+          say('API key saved to the OS keychain.');
+        }
+      }, say),
+      button('Clear key', async () => {
+        await api.ai.clearKey();
+        say('API key removed.');
+      }, say),
+      button('Test key', async () => {
+        say('Testing the key…');
+        const r = await api.ai.testKey();
+        say(r.detail);
+      }, say),
+    ),
+    el('span', { className: 'field-note', text: 'The key is stored encrypted in your OS keychain, never in settings.json, and is sent only to Anthropic when you use the AI features.' }),
     el('div', { className: 'lib-actions' }, button('Save', save, say), button('Revert', () => load(), say)),
     message,
   );

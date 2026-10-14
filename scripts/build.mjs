@@ -7,7 +7,7 @@ const common = { bundle: true, sourcemap: 'linked', logLevel: 'info', target: 'e
 
 await rm('dist', { recursive: true, force: true });
 await Promise.all([
-  build({ ...common, entryPoints: ['src/main/index.ts'], outfile: 'dist/main/index.js', platform: 'node', format: 'cjs', external: ['electron', 'node-pty', 'mongodb-memory-server-core', 'mongoose'] }),
+  build({ ...common, entryPoints: ['src/main/index.ts'], outfile: 'dist/main/index.js', platform: 'node', format: 'cjs', external: ['electron', 'node-pty', 'mongodb-memory-server-core', 'mongoose', '@anthropic-ai/sdk'] }),
   // Sandboxed preloads cannot require() local files, so it must be one self-contained file.
   build({ ...common, entryPoints: ['src/preload/index.ts'], outfile: 'dist/preload/index.js', platform: 'node', format: 'cjs', external: ['electron'] }),
   build({ ...common, entryPoints: ['src/renderer/main.ts'], outfile: 'dist/renderer/main.js', platform: 'browser', format: 'iife' }),

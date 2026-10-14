@@ -1,3 +1,4 @@
+import { DEFAULT_AI_MODEL, type AiModel } from './ai';
 import { DEFAULT_KEYMAP, type Keymap } from './keymap';
 
 export const DEFAULT_MONGODB_URI = 'mongodb://127.0.0.1:27017/inviterminal';
@@ -17,6 +18,10 @@ export interface Settings {
   };
   /** Portal global toggle shortcut; null = none (use the CLI). Takes effect after a restart. */
   globalShortcut: string | null;
+  ai: {
+    /** Model for the explain/assist features. The API key is NOT here — it lives in the OS keychain. */
+    model: AiModel;
+  };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,6 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shortcuts: { ...DEFAULT_KEYMAP },
   library: { mongoUri: DEFAULT_MONGODB_URI, allowRemote: false },
   globalShortcut: null,
+  ai: { model: DEFAULT_AI_MODEL },
 };
 
 export type SettingsPatch = {
@@ -32,6 +38,7 @@ export type SettingsPatch = {
   shortcuts?: Partial<Keymap>;
   library?: Partial<Settings['library']>;
   globalShortcut?: string | null;
+  ai?: Partial<Settings['ai']>;
 };
 
 export interface SettingsView {

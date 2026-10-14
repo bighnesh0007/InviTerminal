@@ -105,6 +105,7 @@ export class SettingsStore {
         shortcuts: { ...this.stored.shortcuts, ...patch.shortcuts },
         library: { ...this.stored.library, ...patch.library },
         globalShortcut: patch.globalShortcut !== undefined ? patch.globalShortcut : this.stored.globalShortcut,
+        ai: { ...this.stored.ai, ...patch.ai },
       };
       const result = SettingsSchema.safeParse(merged);
       if (!result.success) throw new Error(result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));

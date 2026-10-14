@@ -1,11 +1,11 @@
-import { app, type BrowserWindow, desktopCapturer, globalShortcut, ipcMain, type IpcMainInvokeEvent, powerMonitor, screen, session } from 'electron';
+import { app, type BrowserWindow, desktopCapturer, globalShortcut, ipcMain, type IpcMainInvokeEvent, powerMonitor, safeStorage, screen, session } from 'electron';
 import * as nodePty from 'node-pty';
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { captureAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { aiKeyAutotest, captureAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -21,6 +21,9 @@ import { PtyManager } from './terminal/PtyManager';
 import { registerTerminalIpc } from './terminal/register';
 import { detectShellProfiles } from './terminal/shells';
 import { registerVisibility } from './visibility/register';
+import { AnthropicClient } from './ai/AnthropicClient';
+import { KeyStore } from './ai/key-store';
+import { registerAiIpc } from './ai/register';
 import { LibraryService } from './library/LibraryService';
 import { registerLibraryIpc } from './library/register';
 import { isProductionBuild } from './build-mode';
@@ -176,11 +179,19 @@ app.whenReady().then(async () => {
   registerLibraryIpc(() => mainWin, library);
   void library.start();
 
+  // AI: the key lives in the OS keychain (safeStorage), never in settings.json or the renderer.
+  const keyStore = new KeyStore(app.getPath('userData'), safeStorage, process.env);
+  const anthropic = new AnthropicClient(() => keyStore.getKey());
+  registerAiIpc(() => mainWin, keyStore, anthropic, () => settings.effective().ai.model);
+
   // Settings: applied live where possible; startup-only values are flagged as needing a restart.
   settings.onChange((v) => {
     manager.setDefaultProfile(v.effective.terminal.defaultProfile);
     if (!memServer) void library.reconfigure(v.effective.library.mongoUri, v.effective.library.allowRemote);
-    if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.settingsChanged, v);
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send(IPC.settingsChanged, v);
+      void keyStore.status().then((key) => mainWin && !mainWin.isDestroyed() && mainWin.webContents.send(IPC.aiStatusChanged, { model: v.effective.ai.model, key }));
+    }
   });
   ipcMain.handle(IPC.settingsGet, (e) => {
     if (!isFromWindow(e, mainWin)) throw new Error('IPC from unexpected sender');
@@ -232,6 +243,7 @@ app.whenReady().then(async () => {
     if (first && tap && autotest === 'terminal') void done.then(() => terminalAutotest(win, manager, tap));
     if (first && tap && autotest === 'tabs-settings') void done.then(() => tabsSettingsAutotest(win, tap, controller, settings.path));
     if (first && tap && autotest === 'settings-readback') void done.then(() => settingsReadbackAutotest(win, tap, () => settings.view()));
+    if (first && autotest === 'ai-key') void done.then(() => aiKeyAutotest(win, settings.path, app.getPath('userData')));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {

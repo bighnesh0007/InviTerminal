@@ -108,6 +108,15 @@ describe('SettingsStore', () => {
     expect(JSON.parse(await readFile(join(dir, 'settings.json'), 'utf8')).library.mongoUri).toBe(DEFAULT_SETTINGS.library.mongoUri);
   });
 
+  it('round-trips the AI model and rejects an unknown model', async () => {
+    const dir = await tempDir();
+    const s = await SettingsStore.load(dir);
+    expect(s.effective().ai.model).toBe('claude-opus-5-5');
+    await s.update({ ai: { model: 'claude-sonnet-5-5' } });
+    expect((await SettingsStore.load(dir)).effective().ai.model).toBe('claude-sonnet-5-5');
+    await expect(s.update({ ai: { model: 'gpt-4' as never } })).rejects.toThrow();
+  });
+
   it('flags startup-only settings as needing a restart', async () => {
     const dir = await tempDir();
     const s = await SettingsStore.load(dir);

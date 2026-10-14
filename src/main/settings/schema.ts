@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { APP_ACTIONS, chordProblem, keymapProblems, type Keymap } from '../../shared/keymap';
 import { DEFAULT_SETTINGS } from '../../shared/settings';
+import { AI_MODELS } from '../../shared/ai';
 import { isValidGlobalAccelerator } from '../visibility/accelerator';
 
 const Chord = z.string().max(40).superRefine((s, ctx) => {
@@ -37,6 +38,10 @@ export const SettingsSchema = z
       .strict()
       .prefault({}),
     globalShortcut: z.string().refine(isValidGlobalAccelerator, 'not a valid global shortcut (needs a modifier)').nullable().default(d.globalShortcut),
+    ai: z
+      .object({ model: z.enum(AI_MODELS).default(d.ai.model) })
+      .strict()
+      .prefault({}),
   })
   .strict();
 
@@ -47,5 +52,6 @@ export const SettingsPatchSchema = z
     shortcuts: z.object(Object.fromEntries(APP_ACTIONS.map((a) => [a, z.string().max(40)])) as Record<keyof Keymap, z.ZodString>).partial().strict().optional(),
     library: z.object({ mongoUri: z.string().max(2000), allowRemote: z.boolean() }).partial().strict().optional(),
     globalShortcut: z.string().max(60).nullable().optional(),
+    ai: z.object({ model: z.enum(AI_MODELS) }).partial().strict().optional(),
   })
   .strict();

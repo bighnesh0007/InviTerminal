@@ -1,7 +1,8 @@
 import { app, type BrowserWindow, clipboard } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { PALETTE, randomSequence, type CanarySequence } from '../shared/canary';
 import { findCanary } from '../shared/detect-canary';
 import { contentMayShow } from '../shared/protection';
@@ -588,6 +589,43 @@ export async function settingsReadbackAutotest(win: BrowserWindow, tap: Terminal
   try {
     const first = await until('first shell', () => tap.spawned[0], 10_000);
     log('readback', { firstTabProfile: first.profileId, view: view() });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}
+
+/** Phase 7a: API key round-trip through the real renderer + Electron safeStorage. No network. */
+export async function aiKeyAutotest(win: BrowserWindow, settingsFile: string, userDataDir: string): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  const keyFile = join(userDataDir, 'ai-key.enc');
+  const FAKE = 'sk-ant-fake-key-for-autotest-0123456789';
+  try {
+    const { safeStorage } = await import('electron');
+    log('safeStorage', { encryptionAvailable: safeStorage.isEncryptionAvailable() });
+    await until('renderer ready', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
+
+    const before = await js<{ source: string; present: boolean }>('window.inviterminal.ai.status().then(s => s.key)');
+    const setErr = await js<string | null>(`window.inviterminal.ai.setKey(${JSON.stringify(FAKE)})`);
+    await sleep(300);
+    const after = await js<{ source: string; present: boolean; hint: string | null }>('window.inviterminal.ai.status().then(s => s.key)');
+    const fileRaw = await readFile(keyFile).then((b) => b.toString('latin1')).catch(() => '');
+    const settingsRaw = await readFile(settingsFile, 'utf8').catch(() => '');
+    log('set-key', {
+      before,
+      setError: setErr,
+      after,
+      fileEncryptedNotPlaintext: fileRaw.length > 0 && !fileRaw.includes(FAKE),
+      fileMode: (await stat(keyFile)).mode & 0o777,
+      keyAbsentFromSettings: !settingsRaw.includes(FAKE),
+      hintMasksKey: after.hint !== null && !after.hint.includes(FAKE),
+    });
+
+    const cleared = await js<string | null>('window.inviterminal.ai.clearKey().then(() => null, (e) => String(e))');
+    await sleep(200);
+    const end = await js<{ present: boolean }>('window.inviterminal.ai.status().then(s => s.key)');
+    const fileGone = await readFile(keyFile).then(() => false, () => true);
+    log('clear-key', { clearError: cleared, presentAfterClear: end.present, fileRemoved: fileGone });
   } catch (e) {
     log('error', { message: (e as Error).message });
   }

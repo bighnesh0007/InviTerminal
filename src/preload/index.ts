@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { CanarySequence } from '../shared/canary';
 import { type ConcealRequest, IPC, type RendererApi, type ScreencastReport } from '../shared/ipc';
 import type { ProtectionState } from '../shared/protection';
+import type { AiStatus } from '../shared/ai';
 import type { SettingsView } from '../shared/settings';
 import type { LibraryStatus } from '../shared/snippet';
 
@@ -72,6 +73,15 @@ const api: RendererApi = {
     onChange: (cb) => {
       ipcRenderer.on(IPC.settingsChanged, (_e, v: SettingsView) => cb(v));
     },
+  },
+  ai: {
+    status: () => ipcRenderer.invoke(IPC.aiStatus),
+    onStatus: (cb) => {
+      ipcRenderer.on(IPC.aiStatusChanged, (_e, s: AiStatus) => cb(s));
+    },
+    setKey: (key) => ipcRenderer.invoke(IPC.aiSetKey, { key }),
+    clearKey: () => ipcRenderer.invoke(IPC.aiClearKey),
+    testKey: () => ipcRenderer.invoke(IPC.aiTestKey),
   },
 };
 

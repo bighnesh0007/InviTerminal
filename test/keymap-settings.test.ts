@@ -111,9 +111,9 @@ describe('SettingsStore', () => {
   it('round-trips the AI model and rejects an unknown model', async () => {
     const dir = await tempDir();
     const s = await SettingsStore.load(dir);
-    expect(s.effective().ai.model).toBe('llama-3.3-70b-versatile');
-    await s.update({ ai: { model: 'llama-3.1-8b-instant' } });
-    expect((await SettingsStore.load(dir)).effective().ai.model).toBe('llama-3.1-8b-instant');
+    expect(s.effective().ai.model).toBe(DEFAULT_SETTINGS.ai.model); // whatever the current default is
+    await s.update({ ai: { model: 'llama-3.3-70b-versatile' } }); // round-trip to a non-default model
+    expect((await SettingsStore.load(dir)).effective().ai.model).toBe('llama-3.3-70b-versatile');
     await expect(s.update({ ai: { model: 'gpt-4' as never } })).rejects.toThrow();
   });
 

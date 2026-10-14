@@ -117,6 +117,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     allowRemote.checked = s.library.allowRemote;
     globalShortcut.value = s.globalShortcut ?? '';
     aiModel.value = s.ai.model;
+    aiModel.disabled = view.overriddenByEnv.includes('ai.model');
     renderAiStatus(await api.ai.status());
     for (const a of APP_ACTIONS) chordInputs[a].value = canonicalChord(s.shortcuts[a]) ?? s.shortcuts[a];
     sttModel.value = s.stt.modelPath ?? '';

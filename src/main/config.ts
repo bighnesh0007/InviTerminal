@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AI_MODELS } from '../shared/ai';
 import { isValidGlobalAccelerator } from './visibility/accelerator';
 
 /** The only place environment variables are read. */
@@ -22,6 +23,8 @@ const EnvSchema = z.object({
   INVI_TTS_VOICE: z.string().optional(),
   /** Overrides settings.json for this run: the companion TCP port (0 = random). */
   INVI_COMPANION_PORT: z.coerce.number().int().min(0).max(65535).optional(),
+  /** Overrides settings.json for this run: the AI model (also settable in .env). */
+  INVI_AI_MODEL: z.enum(AI_MODELS).optional(),
   /** Use another app data directory (settings, single-instance lock). Autotests use a temp dir so real settings are never touched. */
   INVI_USER_DATA_DIR: z.string().regex(/^\/.+/).optional(),
 });
@@ -71,4 +74,5 @@ export const settingsEnvOverrides = {
   ...(env.INVI_TTS_BIN !== undefined ? { ttsBinaryPath: env.INVI_TTS_BIN } : {}),
   ...(env.INVI_TTS_VOICE !== undefined ? { ttsVoice: env.INVI_TTS_VOICE } : {}),
   ...(env.INVI_COMPANION_PORT !== undefined ? { companionPort: env.INVI_COMPANION_PORT } : {}),
+  ...(env.INVI_AI_MODEL !== undefined ? { aiModel: env.INVI_AI_MODEL } : {}),
 };

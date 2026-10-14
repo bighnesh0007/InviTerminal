@@ -26,19 +26,22 @@ const MOBILE_PAGE = (origin: string, fp: string): string => `<!doctype html><htm
 <title>InviTerminal companion</title>
 <style>body{margin:0;font:15px system-ui,sans-serif;background:#111318;color:#e6e6e6;padding:14px}
 h1{font-size:16px}.item{background:#1a1d24;border:1px solid #23262e;border-radius:8px;padding:10px;margin:8px 0;white-space:pre-wrap;word-break:break-word}
-.who{font-size:11px;color:#9aa0aa;text-transform:uppercase}.fp{font-size:11px;color:#9aa0aa;word-break:break-all}.on{color:#7fd69d}.off{color:#ff8a80}</style>
+.who{font-size:11px;color:#9aa0aa;text-transform:uppercase}.fp{font-size:11px;color:#9aa0aa;word-break:break-all}.on{color:#7fd69d}.off{color:#ff8a80}
+#hint{color:#9aa0aa;margin-top:18px;line-height:1.5}#hint b{color:#e6e6e6}</style>
 </head><body>
 <h1>InviTerminal <span id="s" class="off">connecting…</span></h1>
 <p class="fp">cert: ${fp}</p>
+<div id="hint">Waiting for the desktop…<br><br>On your computer, select some terminal output and run <b>Explain</b> (Ctrl+Shift+E). The explanation will appear here. This page only shows what you explicitly push — nothing else is shared.</div>
 <div id="feed"></div>
 <script>
   const t = location.hash.replace(/^#t=/, '');
   const ws = new WebSocket(location.origin.replace('https','wss') + '/', ['${WS_PROTOCOL}', t]);
-  const s = document.getElementById('s'), feed = document.getElementById('feed');
-  ws.onopen = () => { s.textContent='paired'; s.className='on'; };
+  const s = document.getElementById('s'), feed = document.getElementById('feed'), hint = document.getElementById('hint');
+  ws.onopen = () => { s.textContent='paired'; s.className='on'; hint.firstChild.textContent='Paired. '; };
   ws.onclose = () => { s.textContent='disconnected'; s.className='off'; };
   ws.onerror = () => { s.textContent='refused'; s.className='off'; };
   ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type==='hello') return;
+    hint.style.display='none';
     const d = document.createElement('div'); d.className='item';
     d.innerHTML = '<div class="who"></div><div class="tx"></div>';
     d.querySelector('.who').textContent = (m.title||m.type) + ' · ' + new Date(m.at).toLocaleTimeString();

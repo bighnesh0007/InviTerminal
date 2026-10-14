@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, renameSync } from 'node:fs';
 import { chmod, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { AiModel } from '../../shared/ai';
 import { DEFAULT_SETTINGS, type Settings, type SettingsPatch, type SettingsView } from '../../shared/settings';
 import { checkMongoUri } from '../library/mongo-uri';
 import { SettingsSchema } from './schema';
@@ -16,6 +17,7 @@ export interface EnvOverrides {
   ttsBinaryPath?: string;
   ttsVoice?: string;
   companionPort?: number;
+  aiModel?: AiModel;
 }
 
 const FILE = 'settings.json';
@@ -80,6 +82,7 @@ export class SettingsStore {
     if (this.env.ttsBinaryPath !== undefined) s.tts.binaryPath = this.env.ttsBinaryPath;
     if (this.env.ttsVoice !== undefined) s.tts.voice = this.env.ttsVoice;
     if (this.env.companionPort !== undefined) s.companion.port = this.env.companionPort;
+    if (this.env.aiModel !== undefined) s.ai.model = this.env.aiModel;
     return s;
   }
 
@@ -100,6 +103,7 @@ export class SettingsStore {
     if (this.env.ttsBinaryPath !== undefined) overriddenByEnv.push('tts.binaryPath');
     if (this.env.ttsVoice !== undefined) overriddenByEnv.push('tts.voice');
     if (this.env.companionPort !== undefined) overriddenByEnv.push('companion.port');
+    if (this.env.aiModel !== undefined) overriddenByEnv.push('ai.model');
     const restartRequired = RESTART_PATHS.filter((k) => JSON.stringify(this.effective()[k]) !== JSON.stringify(this.startupValue(k)));
     return { effective: this.effective(), overriddenByEnv, restartRequired: [...restartRequired], file: this.path, loadWarning: this.loadWarning };
   }

@@ -2,6 +2,10 @@ node_modules/
 dist/
 out/
 *.log
+# Secrets: the real .env holds the GROQ_API_KEY — never commit it. .env.example is the tracked template.
+.env
+.env.*
+!.env.example
 .vitest/
 release/
 packaging/arch/pkg/

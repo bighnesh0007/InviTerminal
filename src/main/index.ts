@@ -1,3 +1,4 @@
+import './load-env'; // MUST be first: populate process.env from .env before config/key-store read it
 import { app, type BrowserWindow, desktopCapturer, globalShortcut, ipcMain, type IpcMainInvokeEvent, powerMonitor, safeStorage, screen, session } from 'electron';
 import * as nodePty from 'node-pty';
 import { execFileSync } from 'node:child_process';

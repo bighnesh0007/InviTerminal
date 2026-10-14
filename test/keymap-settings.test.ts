@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SettingsStore } from '../src/main/settings/SettingsStore';
+import { SettingsPatchSchema } from '../src/main/settings/schema';
 import { detectWindowsShellProfiles, parseWslList } from '../src/main/terminal/windows-shells';
 import { actionForEvent, canonicalChord, chordProblem, DEFAULT_KEYMAP, keymapProblems } from '../src/shared/keymap';
 import { DEFAULT_SETTINGS } from '../src/shared/settings';
@@ -108,13 +109,26 @@ describe('SettingsStore', () => {
     expect(JSON.parse(await readFile(join(dir, 'settings.json'), 'utf8')).library.mongoUri).toBe(DEFAULT_SETTINGS.library.mongoUri);
   });
 
-  it('round-trips the AI model and rejects an unknown model', async () => {
+  it('round-trips the AI model; the IPC patch boundary rejects an unknown model', async () => {
     const dir = await tempDir();
     const s = await SettingsStore.load(dir);
     expect(s.effective().ai.model).toBe(DEFAULT_SETTINGS.ai.model); // whatever the current default is
-    await s.update({ ai: { model: 'llama-3.3-70b-versatile' } }); // round-trip to a non-default model
-    expect((await SettingsStore.load(dir)).effective().ai.model).toBe('llama-3.3-70b-versatile');
-    await expect(s.update({ ai: { model: 'gpt-4' as never } })).rejects.toThrow();
+    await s.update({ ai: { model: 'openai/gpt-oss-120b' } }); // round-trip to a non-default model
+    expect((await SettingsStore.load(dir)).effective().ai.model).toBe('openai/gpt-oss-120b');
+    // An unknown model is refused at the IPC boundary (where renderer input is validated).
+    expect(SettingsPatchSchema.safeParse({ ai: { model: 'gpt-4' } }).success).toBe(false);
+    expect(SettingsPatchSchema.safeParse({ ai: { model: 'openai/gpt-oss-20b' } }).success).toBe(true);
+  });
+
+  it('a settings file naming a retired model falls back to the default, keeping the rest of the file', async () => {
+    const dir = await tempDir();
+    // Simulate an old file whose ai.model (a since-removed Groq Llama) is no longer valid.
+    const stale = { ...DEFAULT_SETTINGS, terminal: { ...DEFAULT_SETTINGS.terminal, fontSize: 19 }, ai: { model: 'llama-3.1-8b-instant' } };
+    await writeFile(join(dir, 'settings.json'), JSON.stringify(stale));
+    const s = await SettingsStore.load(dir);
+    expect(s.effective().ai.model).toBe(DEFAULT_SETTINGS.ai.model); // fell back, not rejected
+    expect(s.effective().terminal.fontSize).toBe(19); // the rest of the file survived
+    expect(s.view().loadWarning).toBeNull(); // file was NOT moved aside
   });
 
   it('flags startup-only settings as needing a restart', async () => {

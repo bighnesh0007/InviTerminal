@@ -6,8 +6,8 @@ import { loadDotEnv, parseDotEnv } from '../src/main/dotenv';
 
 describe('parseDotEnv', () => {
   it('parses KEY=VALUE, export, comments and blank lines', () => {
-    const r = parseDotEnv('# a comment\n\nGROQ_API_KEY=gsk_abc123\nexport INVI_AI_MODEL=llama-3.1-8b-instant\n');
-    expect(r).toEqual({ GROQ_API_KEY: 'gsk_abc123', INVI_AI_MODEL: 'llama-3.1-8b-instant' });
+    const r = parseDotEnv('# a comment\n\nGROQ_API_KEY=gsk_abc123\nexport INVI_AI_MODEL=openai/gpt-oss-20b\n');
+    expect(r).toEqual({ GROQ_API_KEY: 'gsk_abc123', INVI_AI_MODEL: 'openai/gpt-oss-20b' });
   });
   it('trims unquoted values and strips a trailing inline comment', () => {
     expect(parseDotEnv('K=  value  # trailing')).toEqual({ K: 'value' });

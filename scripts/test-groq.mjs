@@ -21,7 +21,7 @@ function keyFromDotEnv() {
   return undefined;
 }
 
-const DEFAULT_MODEL = 'llama-3.1-8b-instant';
+const DEFAULT_MODEL = 'openai/gpt-oss-20b';
 const key = process.env.GROQ_API_KEY?.trim() || keyFromDotEnv();
 
 if (!key) {

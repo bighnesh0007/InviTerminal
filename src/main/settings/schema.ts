@@ -39,7 +39,9 @@ export const SettingsSchema = z
       .prefault({}),
     globalShortcut: z.string().refine(isValidGlobalAccelerator, 'not a valid global shortcut (needs a modifier)').nullable().default(d.globalShortcut),
     ai: z
-      .object({ model: z.enum(AI_MODELS).default(d.ai.model) })
+      // A model ID that was removed from Groq (e.g. the retired Llama 3.x) falls back to the
+      // default instead of invalidating the whole settings file.
+      .object({ model: z.enum(AI_MODELS).catch(d.ai.model).default(d.ai.model) })
       .strict()
       .prefault({}),
     stt: z

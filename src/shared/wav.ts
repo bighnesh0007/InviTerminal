@@ -55,6 +55,35 @@ export function encodeWav(samples: Float32Array, inputRate: number, outputRate: 
   return new Uint8Array(buf);
 }
 
+/**
+ * Wraps already-16-bit little-endian PCM (e.g. from parecord --format=s16le) in a WAV
+ * header, without re-encoding. Used by the live-capture path where the recorder already
+ * produces the right rate/format.
+ */
+export function wrapPcm16Wav(pcm: Uint8Array, rate: number = WHISPER_SAMPLE_RATE, channels: number = 1): Uint8Array {
+  const dataLen = pcm.length;
+  const out = new Uint8Array(44 + dataLen);
+  const view = new DataView(out.buffer);
+  const writeStr = (off: number, s: string) => {
+    for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i));
+  };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + dataLen, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, channels, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * channels * 2, true); // byte rate
+  view.setUint16(32, channels * 2, true); // block align
+  view.setUint16(34, 16, true); // bits per sample
+  writeStr(36, 'data');
+  view.setUint32(40, dataLen, true);
+  out.set(pcm, 44);
+  return out;
+}
+
 /** Header check used before spawning whisper: RIFF/WAVE plus a 'data' chunk (which may follow other chunks). */
 export function isWav(bytes: Uint8Array): boolean {
   if (bytes.length < 44) return false;

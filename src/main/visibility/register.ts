@@ -40,6 +40,8 @@ export interface VisibilityWiring {
   setRecording(status: AudioStatus, onStop: () => void): void;
   /** Updates the tray to reflect active phone sharing (persistent indicator). */
   setSharing(active: boolean, clients: number, onStop: () => void): void;
+  /** Updates the tray to reflect active live meeting transcription (persistent indicator). */
+  setLive(active: boolean, onStop: () => void): void;
 }
 
 export function registerVisibility(win: BrowserWindow): VisibilityWiring {
@@ -63,21 +65,25 @@ export function registerVisibility(win: BrowserWindow): VisibilityWiring {
   let tray: Tray | null = null;
   let recState: { status: AudioStatus; onStop: () => void } | null = null;
   let shareState: { clients: number; onStop: () => void } | null = null;
+  let liveState: { onStop: () => void } | null = null;
   const refreshTray = () => {
     if (!tray) return;
     const recording = recState?.status.active ?? false;
     const sharing = shareState !== null;
+    const live = liveState !== null;
     // Deliberately visible in a shared screen — recording/sharing is never hidden.
     const bits = ['InviTerminal'];
     if (recording) bits.push(`● recording (${AUDIO_KIND_LABEL[recState!.status.kind!]})`);
+    if (live) bits.push('● live transcript');
     if (sharing) bits.push(`📱 sharing (${shareState!.clients})`);
     tray.setToolTip(bits.join(' — '));
     const items: Electron.MenuItemConstructorOptions[] = [
       { label: 'Show / Hide', click: () => void controller.toggle() },
       { label: 'Hide now', click: () => void controller.hide('panic') },
     ];
-    if (recording || sharing) items.push({ type: 'separator' });
+    if (recording || sharing || live) items.push({ type: 'separator' });
     if (recording) items.push({ label: '● Stop recording', click: () => recState!.onStop() });
+    if (live) items.push({ label: '● Stop live transcript', click: () => liveState!.onStop() });
     if (sharing) items.push({ label: '📱 Stop sharing', click: () => shareState!.onStop() });
     items.push({ type: 'separator' }, { label: 'Quit', click: () => app.quit() });
     tray.setContextMenu(Menu.buildFromTemplate(items));
@@ -101,6 +107,10 @@ export function registerVisibility(win: BrowserWindow): VisibilityWiring {
     },
     setSharing: (active, clients, onStop) => {
       shareState = active ? { clients, onStop } : null;
+      refreshTray();
+    },
+    setLive: (active, onStop) => {
+      liveState = active ? { onStop } : null;
       refreshTray();
     },
   };

@@ -10,6 +10,7 @@ import { mountAiPanel } from './ai-panel';
 import { mountAudioPanel } from './audio-panel';
 import { mountCompanionPanel } from './companion-panel';
 import { mountPracticePanel } from './practice-panel';
+import { mountLiveTranscriptPanel } from './live-transcript-panel';
 import { mountSettings } from './settings';
 import { mountTabs } from './tabs';
 
@@ -112,7 +113,7 @@ function renderMain(): void {
   termWrap.prepend(tabs.bar);
 
   const panelChanged = () => {
-    const anyOpen = library.isOpen() || settingsPanel.isOpen() || aiPanel.isOpen() || audioPanel.isOpen() || practicePanel.isOpen() || companionPanel.isOpen();
+    const anyOpen = library.isOpen() || settingsPanel.isOpen() || aiPanel.isOpen() || audioPanel.isOpen() || practicePanel.isOpen() || companionPanel.isOpen() || livePanel.isOpen();
     termWrap.classList.toggle('lib-open', anyOpen);
     requestAnimationFrame(() => {
       tabs.fit();
@@ -157,6 +158,7 @@ function renderMain(): void {
     if (keep !== 'audio') audioPanel.close();
     if (keep !== 'practice') practicePanel.close();
     if (keep !== 'companion') companionPanel.close();
+    if (keep !== 'live') livePanel.close();
   };
   const audioPanel = mountAudioPanel(api, {
     onOpenChange: (open) => {
@@ -176,7 +178,13 @@ function renderMain(): void {
       panelChanged();
     },
   });
-  termWrap.append(library.element, settingsPanel.element, aiPanel.element, audioPanel.element, practicePanel.element, companionPanel.element);
+  const livePanel = mountLiveTranscriptPanel(api, {
+    onOpenChange: (open) => {
+      if (open) closeOthers('live');
+      panelChanged();
+    },
+  });
+  termWrap.append(library.element, settingsPanel.element, aiPanel.element, audioPanel.element, practicePanel.element, companionPanel.element, livePanel.element);
 
   gate.append(
     button('Show anyway', () => {
@@ -202,6 +210,7 @@ function renderMain(): void {
     audioPanel.element.classList.toggle('concealed', !show);
     practicePanel.element.classList.toggle('concealed', !show);
     companionPanel.element.classList.toggle('concealed', !show);
+    livePanel.element.classList.toggle('concealed', !show);
     tabs.bar.classList.toggle('concealed', !show);
     // Nothing behind the cover may keep keyboard focus (e.g. the snippet search box).
     if (!show && document.activeElement instanceof HTMLElement && termWrap.contains(document.activeElement)) document.activeElement.blur();
@@ -284,8 +293,9 @@ function renderMain(): void {
   const micButton = button('Mic', () => audioPanel.toggle());
   const practiceButton = button('Practice', () => practicePanel.toggle());
   const shareButton = button('Share', () => companionPanel.toggle());
+  const liveButton = button('Live', () => livePanel.toggle());
   const settingsButton = button('Settings', () => settingsPanel.toggle());
-  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, audioPanel.badge, companionPanel.badge, el('span', { className: 'spacer' }), explainButton, micButton, practiceButton, shareButton, libraryButton, settingsButton, hideButton, drawerToggle), drawer, termWrap);
+  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, audioPanel.badge, companionPanel.badge, livePanel.badge, el('span', { className: 'spacer' }), explainButton, micButton, practiceButton, shareButton, liveButton, libraryButton, settingsButton, hideButton, drawerToggle), drawer, termWrap);
 
   // Button tooltips show the current shortcuts.
   const showChords = () => {

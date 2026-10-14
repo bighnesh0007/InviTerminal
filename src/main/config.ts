@@ -6,7 +6,7 @@ import { isValidGlobalAccelerator } from './visibility/accelerator';
 const EnvSchema = z.object({
   INVI_RECHECK_INTERVAL_MS: z.coerce.number().int().min(1000).max(600_000).default(10_000),
   /** Development aid: drive the real app (capture self-test, or a real shell session), log JSON, and quit. */
-  INVI_AUTOTEST: z.enum(['off', 'screenshot', 'terminal', 'ui-snapshot', 'visibility', 'portal-shortcut', 'library', 'tabs-settings', 'settings-readback', 'ai-key', 'ai-explain', 'mic-gate', 'stt', 'tts', 'practice', 'companion']).default('off'),
+  INVI_AUTOTEST: z.enum(['off', 'screenshot', 'terminal', 'ui-snapshot', 'visibility', 'portal-shortcut', 'library', 'tabs-settings', 'settings-readback', 'ai-key', 'ai-explain', 'mic-gate', 'stt', 'tts', 'practice', 'companion', 'live']).default('off'),
   /** Where ui-snapshot writes its PNG. Absolute path, .png only. */
   INVI_SNAPSHOT_PATH: z.string().regex(/^\/.+\.png$/).optional(),
   /** Overrides settings.json for this run (dev/tests): the portal global shortcut, e.g. "Control+Alt+T". */

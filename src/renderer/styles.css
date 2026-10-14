@@ -137,3 +137,12 @@ textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; 
 .qr-wrap[hidden] { display: none; }
 .qr-wrap .qr { width: 240px; height: 240px; image-rendering: pixelated; }
 .companion-info .fp { font-family: ui-monospace, monospace; font-size: 11px; color: #7fd69d; word-break: break-all; margin: 2px 0 8px; }
+/* ---- live transcript ------------------------------------------------------------------ */
+.live-panel { display: flex; flex-direction: column; }
+.live-badge { background: var(--bad); }
+.live-consent { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: var(--muted); margin: 6px 0; }
+.live-consent input { margin-top: 2px; }
+.live-feed { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
+.live-line { display: flex; gap: 8px; align-items: baseline; }
+.live-time { font-family: ui-monospace, monospace; font-size: 10px; color: var(--muted); flex: none; }
+.live-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }

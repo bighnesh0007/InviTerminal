@@ -117,6 +117,20 @@ const api: RendererApi = {
     speak: (text) => ipcRenderer.invoke(IPC.ttsSpeak, { text }),
     stop: () => ipcRenderer.send(IPC.ttsStop),
   },
+  live: {
+    status: () => ipcRenderer.invoke(IPC.liveStatus),
+    start: (consent) => ipcRenderer.invoke(IPC.liveStart, { consent }),
+    stop: () => ipcRenderer.invoke(IPC.liveStop),
+    onStatus: (cb) => {
+      ipcRenderer.on(IPC.liveStatusChanged, (_e, s) => cb(s));
+    },
+    onLine: (cb) => {
+      ipcRenderer.on(IPC.liveLine, (_e, l) => cb(l));
+    },
+    onError: (cb) => {
+      ipcRenderer.on(IPC.liveError, (_e, m: string) => cb(m));
+    },
+  },
   companion: {
     status: () => ipcRenderer.invoke(IPC.companionStatus),
     onStatus: (cb) => {

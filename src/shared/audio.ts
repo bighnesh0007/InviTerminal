@@ -33,3 +33,31 @@ export interface TtsStatus {
   voice: string | null;
   reason: string | null;
 }
+
+export interface LiveTranscriptStatus {
+  active: boolean;
+  /** The capture source being recorded (a PipeWire monitor), or null when idle. */
+  source: string | null;
+  /** ISO start time, for the elapsed indicator. */
+  since: string | null;
+  /** Lines emitted so far this session. */
+  lines: number;
+  /** Set when live transcription can't run (e.g. no whisper model). */
+  reason: string | null;
+}
+
+export interface LiveLine {
+  text: string;
+  at: string;
+}
+
+/**
+ * whisper emits a few stock strings for a silent/near-silent chunk ("you",
+ * "[BLANK_AUDIO]", etc.). Dropping them keeps the live transcript clean. Kept
+ * conservative so real speech is never filtered.
+ */
+export function isSilenceTranscript(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[.!?,…]+$/g, '').trim();
+  if (!t) return true;
+  return ['you', 'thank you', 'thanks for watching', '[blank_audio]', '(silence)', 'bye'].includes(t);
+}

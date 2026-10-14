@@ -1,7 +1,7 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
 import type { AiStatus } from './ai';
-import type { AudioKind, AudioStatus, SttStatus, TtsStatus } from './audio';
+import type { AudioKind, AudioStatus, LiveLine, LiveTranscriptStatus, SttStatus, TtsStatus } from './audio';
 import type { CompanionStatus } from './companion';
 import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
@@ -80,6 +80,15 @@ export const IPC = {
   ttsStatus: 'tts:status',
   ttsSpeak: 'tts:speak',
   ttsStop: 'tts:stop',
+  liveStatus: 'live:status',
+  liveStart: 'live:start',
+  liveStop: 'live:stop',
+  /** main → renderer */
+  liveStatusChanged: 'live:status-changed',
+  /** main → renderer */
+  liveLine: 'live:line',
+  /** main → renderer */
+  liveError: 'live:error',
   practiceStart: 'practice:start',
   practiceAnswer: 'practice:answer',
   practiceCancel: 'practice:cancel',
@@ -215,6 +224,15 @@ export interface RendererApi {
     speak(text: string): Promise<void>;
     /** Stop any speech in progress. */
     stop(): void;
+  };
+  live: {
+    status(): Promise<LiveTranscriptStatus>;
+    /** Start live transcription of the call audio. `consent` must be true (everyone informed). */
+    start(consent: boolean): Promise<LiveTranscriptStatus>;
+    stop(): Promise<void>;
+    onStatus(cb: (s: LiveTranscriptStatus) => void): void;
+    onLine(cb: (line: LiveLine) => void): void;
+    onError(cb: (message: string) => void): void;
   };
   companion: {
     status(): Promise<CompanionStatus>;

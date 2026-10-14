@@ -38,6 +38,12 @@ export interface Settings {
     /** TCP port for "Share to phone". A fixed port lets you keep one firewall rule; 0 = random each time. */
     port: number;
   };
+  liveTranscript: {
+    /** PipeWire capture source (a monitor), or null to auto-detect the default output's monitor. */
+    source: string | null;
+    /** Seconds of audio per transcription chunk (lower = more live, higher = more accurate). */
+    chunkSeconds: number;
+  };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -51,6 +57,7 @@ export const DEFAULT_SETTINGS: Settings = {
   tts: { binaryPath: null, voice: null },
   // A fixed default so one firewall rule keeps working; the user can change it or set 0 for random.
   companion: { port: 41830 },
+  liveTranscript: { source: null, chunkSeconds: 6 },
 };
 
 export type SettingsPatch = {
@@ -62,6 +69,7 @@ export type SettingsPatch = {
   stt?: Partial<Settings['stt']>;
   tts?: Partial<Settings['tts']>;
   companion?: Partial<Settings['companion']>;
+  liveTranscript?: Partial<Settings['liveTranscript']>;
 };
 
 export interface SettingsView {

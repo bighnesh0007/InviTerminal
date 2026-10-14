@@ -128,6 +128,7 @@ export class SettingsStore {
         stt: { ...this.stored.stt, ...patch.stt },
         tts: { ...this.stored.tts, ...patch.tts },
         companion: { ...this.stored.companion, ...patch.companion },
+        liveTranscript: { ...this.stored.liveTranscript, ...patch.liveTranscript },
       };
       const result = SettingsSchema.safeParse(merged);
       if (!result.success) throw new Error(result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));

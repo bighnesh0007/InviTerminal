@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { aiExplainAutotest, aiKeyAutotest, captureAutotest, companionAutotest, micGateAutotest, practiceAutotest, sttAutotest, ttsAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { aiExplainAutotest, aiKeyAutotest, captureAutotest, companionAutotest, liveTranscriptAutotest, micGateAutotest, practiceAutotest, sttAutotest, ttsAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -29,6 +29,8 @@ import { WhisperStt } from './audio/WhisperStt';
 import { registerSttIpc } from './audio/stt-register';
 import { type RunTts, TtsSpeaker } from './audio/TtsSpeaker';
 import { registerTtsIpc } from './audio/tts-register';
+import { type CaptureProcess, defaultMonitorSource, LiveTranscriptController, parecordCapture, type StartCapture } from './audio/LiveTranscriptController';
+import { registerLiveIpc } from './audio/live-register';
 import { GroqClient } from './ai/GroqClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
@@ -281,12 +283,51 @@ app.whenReady().then(async () => {
     autotest !== 'off' ? fakeTtsRun : undefined,
   );
   registerTtsIpc(() => mainWin, tts);
+
+  // Live meeting transcription (Phase 1): system-audio capture → whisper → streamed lines.
+  // Autotests use a fake capture (scripted zero-filled chunks) + a scripted transcriber so the
+  // renderer → IPC → panel chain is deterministic without real audio or the whisper model.
+  const sendLive = (channel: string, ...args: unknown[]) => {
+    if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(channel, ...args);
+  };
+  const liveScript = ['Tell me about yourself.', 'What is your biggest strength?', 'Describe a hard bug you fixed.'];
+  let liveIdx = 0;
+  const fakeTranscriber = { status: () => ({ available: true, binary: 'fake', binaryFound: true, model: 'fake', modelFound: true, reason: null }), transcribe: async () => ({ text: liveScript[liveIdx++ % liveScript.length]!, ms: 5 }) };
+  const fakeLiveCapture: StartCapture = (): CaptureProcess => {
+    let dataCb: ((b: Uint8Array) => void) | null = null;
+    let emitted = 0;
+    const chunkBytes = settings.effective().liveTranscript.chunkSeconds * 16_000 * 2;
+    const timer = setInterval(() => {
+      if (dataCb && emitted < liveScript.length) {
+        dataCb(new Uint8Array(chunkBytes));
+        emitted++;
+      }
+    }, 120);
+    return { onData: (cb) => (dataCb = cb), onError: () => undefined, onClose: () => undefined, kill: () => clearInterval(timer) };
+  };
+  const live = new LiveTranscriptController(
+    autotest !== 'off' ? fakeTranscriber : stt,
+    autotest !== 'off' ? fakeLiveCapture : parecordCapture,
+    () => settings.effective().liveTranscript.source ?? defaultMonitorSource(),
+    () => settings.effective().liveTranscript.chunkSeconds,
+    {
+      line: (l) => sendLive(IPC.liveLine, l),
+      state: (s) => {
+        sendLive(IPC.liveStatusChanged, s);
+        visibility.setLive(s.active, () => void live.stop());
+      },
+      error: (m) => sendLive(IPC.liveError, m),
+    },
+  );
+  registerLiveIpc(() => mainWin, live);
+  app.on('before-quit', () => void live.stop());
+
   audio.onChange((st) => {
     if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.audioStatusChanged, st);
     visibility.setRecording(st, () => audio.stop());
   });
   // If the window is destroyed while recording, stop the mic (no orphaned capture).
-  win.on('closed', () => { void audio.stop(); void companion.stop(); });
+  win.on('closed', () => { void audio.stop(); void companion.stop(); void live.stop(); });
 
   // register() returning true is not proof the key works (with the portal, the user has not even
   // confirmed yet); firedCount is what the autotest checks.
@@ -314,6 +355,7 @@ app.whenReady().then(async () => {
     if (first && autotest === 'tts') void done.then(() => ttsAutotest(win, controller, ttsSpoken));
     if (first && autotest === 'practice') void done.then(() => practiceAutotest(win, controller));
     if (first && autotest === 'companion') void done.then(() => companionAutotest(win, companion));
+    if (first && autotest === 'live') void done.then(() => liveTranscriptAutotest(win, controller));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {

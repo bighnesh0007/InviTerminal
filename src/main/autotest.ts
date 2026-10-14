@@ -846,6 +846,58 @@ export async function ttsAutotest(win: BrowserWindow, controller: ProtectionCont
   win.close();
 }
 
+/**
+ * Phase 1 (live transcript): drives the real renderer with a FAKE capture (scripted zero chunks)
+ * and a scripted transcriber, so the consent gate → capture → chunk → transcribe → line → panel
+ * chain is observable without real audio or the whisper model. Also checks consent is required.
+ */
+export async function liveTranscriptAutotest(win: BrowserWindow, controller: ProtectionController): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  const clickIn = (scope: string, text: string) =>
+    js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
+  const lines = () => js<string[]>(`[...document.querySelectorAll('.live-feed .live-line .live-text')].map(e => e.textContent)`);
+  const waitFor = async (pred: () => Promise<boolean>, ms = 12_000): Promise<boolean> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (await pred()) return true;
+      await sleep(100);
+    }
+    return false;
+  };
+  try {
+    await until('renderer', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
+    await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
+
+    await clickIn('header', 'Live');
+    await sleep(200);
+
+    // Negative control: Start is disabled until consent is checked.
+    const startDisabledNoConsent = await js<boolean>(`document.querySelector('.live-panel .lib-actions button').disabled`);
+    log('consent-gate', { startDisabledWithoutConsent: startDisabledNoConsent });
+
+    await js(`document.querySelector('.live-consent input').click()`); // give consent
+    await sleep(100);
+    await clickIn('.live-panel .lib-actions', 'Start transcribing');
+
+    const gotLines = await waitFor(async () => (await lines()).length >= 2);
+    const seen = await lines();
+    log('transcribing', { gotLines, lineCount: seen.length, first: seen[0], badge: await js<string>(`document.querySelector('.live-badge').textContent`) });
+
+    // Behind the gate: removing protection conceals the panel.
+    await controller.unprotect();
+    await sleep(300);
+    log('gated', { visibility: await js<string>(`getComputedStyle(document.querySelector('.live-panel')).visibility`) });
+    await controller.protect();
+
+    await clickIn('.live-panel .lib-actions', 'Stop');
+    await sleep(200);
+    log('stopped', { badgeHidden: await js<boolean>(`document.querySelector('.live-badge').hidden`) });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}
+
 /** Phase 7e: the interview practice loop through the real renderer with the stub interviewer. */
 export async function practiceAutotest(win: BrowserWindow, controller: ProtectionController): Promise<void> {
   const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;

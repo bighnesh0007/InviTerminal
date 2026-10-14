@@ -44,11 +44,17 @@ export interface LiveTranscriptStatus {
   lines: number;
   /** Set when live transcription can't run (e.g. no whisper model). */
   reason: string | null;
+  /** Whether speaker-turn labelling (tinydiarize) is available (the tdrz model is present). */
+  diarizeAvailable: boolean;
+  /** Whether this session is labelling speaker turns. */
+  diarizing: boolean;
 }
 
 export interface LiveLine {
   text: string;
   at: string;
+  /** Speaker-turn label (e.g. "Speaker 1") when diarizing; absent otherwise. Turn detection within a chunk, not a persistent identity. */
+  speaker?: string;
 }
 
 /**

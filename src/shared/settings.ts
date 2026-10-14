@@ -43,6 +43,8 @@ export interface Settings {
     source: string | null;
     /** Seconds of audio per transcription chunk (lower = more live, higher = more accurate). */
     chunkSeconds: number;
+    /** Path to a whisper.cpp tinydiarize model (ggml-small.en-tdrz.bin), or null for the default in the data dir. */
+    tdrzModelPath: string | null;
   };
 }
 
@@ -57,7 +59,7 @@ export const DEFAULT_SETTINGS: Settings = {
   tts: { binaryPath: null, voice: null },
   // A fixed default so one firewall rule keeps working; the user can change it or set 0 for random.
   companion: { port: 41830 },
-  liveTranscript: { source: null, chunkSeconds: 6 },
+  liveTranscript: { source: null, chunkSeconds: 6, tdrzModelPath: null },
 };
 
 export type SettingsPatch = {

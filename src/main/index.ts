@@ -269,6 +269,8 @@ app.whenReady().then(async () => {
     binaryPath: settings.effective().stt.binaryPath,
     modelPath: settings.effective().stt.modelPath,
     defaultModelPath: join(app.getPath('userData'), 'models', 'ggml-base.en.bin'),
+    tdrzModelPath: settings.effective().liveTranscript.tdrzModelPath,
+    defaultTdrzModelPath: join(app.getPath('userData'), 'models', 'ggml-small.en-tdrz.bin'),
   }));
   registerSttIpc(() => mainWin, stt);
   // Autotests record the spoken text with a fake engine, so no real audio plays and the
@@ -292,7 +294,15 @@ app.whenReady().then(async () => {
   };
   const liveScript = ['Tell me about yourself.', 'What is your biggest strength?', 'Describe a hard bug you fixed.'];
   let liveIdx = 0;
-  const fakeTranscriber = { status: () => ({ available: true, binary: 'fake', binaryFound: true, model: 'fake', modelFound: true, reason: null }), transcribe: async () => ({ text: liveScript[liveIdx++ % liveScript.length]!, ms: 5 }) };
+  const fakeTranscriber = {
+    status: () => ({ available: true, binary: 'fake', binaryFound: true, model: 'fake', modelFound: true, reason: null }),
+    diarizeStatus: () => ({ available: true, model: 'fake-tdrz', reason: null }),
+    transcribe: async (_wav: string, o?: { diarize?: boolean }) => {
+      const text = liveScript[liveIdx++ % liveScript.length]!;
+      // When diarizing, pretend the chunk had two speaker turns.
+      return o?.diarize ? { text, ms: 5, turns: [text, 'And how did you test it?'] } : { text, ms: 5 };
+    },
+  };
   const fakeLiveCapture: StartCapture = (): CaptureProcess => {
     let dataCb: ((b: Uint8Array) => void) | null = null;
     let emitted = 0;

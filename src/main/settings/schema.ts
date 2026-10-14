@@ -74,6 +74,7 @@ export const SettingsSchema = z
       .object({
         source: z.string().max(256).nullable().default(d.liveTranscript.source),
         chunkSeconds: z.number().int().min(3).max(30).default(d.liveTranscript.chunkSeconds),
+        tdrzModelPath: z.string().max(4096).nullable().default(d.liveTranscript.tdrzModelPath),
       })
       .strict()
       .prefault({}),
@@ -91,6 +92,6 @@ export const SettingsPatchSchema = z
     stt: z.object({ modelPath: z.string().max(4096).nullable(), binaryPath: z.string().max(4096).nullable() }).partial().strict().optional(),
     tts: z.object({ binaryPath: z.string().max(4096).nullable(), voice: z.string().max(64).nullable() }).partial().strict().optional(),
     companion: z.object({ port: z.number().int().min(0).max(65535).refine((p) => p === 0 || p >= 1024, 'use 0 (random) or a port between 1024 and 65535') }).partial().strict().optional(),
-    liveTranscript: z.object({ source: z.string().max(256).nullable(), chunkSeconds: z.number().int().min(3).max(30) }).partial().strict().optional(),
+    liveTranscript: z.object({ source: z.string().max(256).nullable(), chunkSeconds: z.number().int().min(3).max(30), tdrzModelPath: z.string().max(4096).nullable() }).partial().strict().optional(),
   })
   .strict();

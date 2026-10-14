@@ -119,7 +119,7 @@ const api: RendererApi = {
   },
   live: {
     status: () => ipcRenderer.invoke(IPC.liveStatus),
-    start: (consent) => ipcRenderer.invoke(IPC.liveStart, { consent }),
+    start: (consent, diarize) => ipcRenderer.invoke(IPC.liveStart, { consent, diarize }),
     stop: () => ipcRenderer.invoke(IPC.liveStop),
     onStatus: (cb) => {
       ipcRenderer.on(IPC.liveStatusChanged, (_e, s) => cb(s));

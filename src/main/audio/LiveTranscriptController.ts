@@ -9,7 +9,8 @@ import { PcmChunker } from './PcmChunker';
 /** The slice of WhisperStt the live controller needs (so tests use a fake transcriber). */
 export interface Transcriber {
   status(): SttStatus;
-  transcribe(wavPath: string, opts?: { timeoutMs?: number }): Promise<{ text: string; ms: number }>;
+  diarizeStatus(): { available: boolean; model: string; reason: string | null };
+  transcribe(wavPath: string, opts?: { timeoutMs?: number; diarize?: boolean }): Promise<{ text: string; ms: number; turns?: string[] }>;
 }
 
 /** A running capture process. Injectable so tests drive a fake instead of parecord. */
@@ -72,6 +73,7 @@ export class LiveTranscriptController {
   private source: string | null = null;
   private since: string | null = null;
   private lineCount = 0;
+  private diarize = false;
 
   constructor(
     private readonly stt: Transcriber,
@@ -93,6 +95,8 @@ export class LiveTranscriptController {
       since: this.since,
       lines: this.lineCount,
       reason: s.available ? null : s.reason,
+      diarizeAvailable: this.stt.diarizeStatus().available,
+      diarizing: this.diarize,
     };
   }
 
@@ -100,8 +104,11 @@ export class LiveTranscriptController {
     this.emit.state(this.status());
   }
 
-  /** @param consent must be true — the user confirms everyone in the call is informed. */
-  async start(consent: boolean): Promise<LiveTranscriptStatus> {
+  /**
+   * @param consent must be true — the user confirms everyone in the call is informed.
+   * @param diarize label speaker turns (only takes effect if the tdrz model is present).
+   */
+  async start(consent: boolean, diarize = false): Promise<LiveTranscriptStatus> {
     if (this.proc) return this.status();
     if (!consent) throw new Error('Live transcription records everyone in the call. Confirm that they have been told, then start.');
     const stt = this.stt.status();
@@ -109,6 +116,7 @@ export class LiveTranscriptController {
     const source = this.resolveSource();
     if (!source) throw new Error('No audio capture source found. Play the call through your speakers, or set a source in Settings.');
 
+    this.diarize = diarize && this.stt.diarizeStatus().available;
     const seconds = Math.min(30, Math.max(3, Math.round(this.chunkSeconds())));
     this.chunker = new PcmChunker(seconds * WHISPER_SAMPLE_RATE * 2);
     this.source = source;
@@ -135,6 +143,7 @@ export class LiveTranscriptController {
     this.queue = [];
     this.source = null;
     this.since = null;
+    this.diarize = false;
     this.emitState();
   }
 
@@ -166,12 +175,30 @@ export class LiveTranscriptController {
     const file = join(dir, 'chunk.wav');
     try {
       await writeFile(file, wav, { mode: 0o600 });
-      const r = await this.stt.transcribe(file, { timeoutMs: 60_000 });
-      const text = r.text.trim();
-      if (text && !isSilenceTranscript(text) && this.proc) {
-        this.lineCount++;
-        this.emit.line({ text, at: new Date().toISOString() });
-        this.emitState();
+      const r = await this.stt.transcribe(file, { timeoutMs: 60_000, diarize: this.diarize });
+      if (!this.proc) return; // stopped while transcribing
+      const at = new Date().toISOString();
+      if (this.diarize && r.turns && r.turns.length > 0) {
+        // [SPEAKER_TURN] marks a change, so segments alternate between two speakers. This is
+        // turn detection within a chunk, not a persistent identity across chunks.
+        let speaker = 0;
+        let emitted = false;
+        for (const seg of r.turns) {
+          const t = seg.trim();
+          if (!t || isSilenceTranscript(t)) continue;
+          this.lineCount++;
+          this.emit.line({ text: t, at, speaker: `Speaker ${speaker + 1}` });
+          speaker = (speaker + 1) % 2;
+          emitted = true;
+        }
+        if (emitted) this.emitState();
+      } else {
+        const text = r.text.trim();
+        if (text && !isSilenceTranscript(text)) {
+          this.lineCount++;
+          this.emit.line({ text, at });
+          this.emitState();
+        }
       }
     } catch (e) {
       this.emit.error((e as Error).message);

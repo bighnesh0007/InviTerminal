@@ -62,6 +62,13 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   ttsVoice.placeholder = 'voice/language, e.g. en (empty = engine default)';
   const ttsStatus = el('span', { className: 'field-note' });
   const companionPort = Object.assign(el('input'), { type: 'number', min: '0', max: '65535' });
+  const liveSource = el('input');
+  liveSource.spellcheck = false;
+  liveSource.placeholder = 'default: your output device’s monitor';
+  const liveChunk = Object.assign(el('input'), { type: 'number', min: '3', max: '30' });
+  const liveTdrz = el('input');
+  liveTdrz.spellcheck = false;
+  liveTdrz.placeholder = 'default: <data dir>/models/ggml-small.en-tdrz.bin';
 
   const field = (label: string, input: HTMLElement, note?: HTMLElement) => el('label', { className: 'lib-field' }, el('span', { text: label }), input, ...(note ? [note] : []));
 
@@ -131,6 +138,9 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     });
     companionPort.value = String(s.companion.port);
     companionPort.disabled = view.overriddenByEnv.includes('companion.port');
+    liveSource.value = s.liveTranscript.source ?? '';
+    liveChunk.value = String(s.liveTranscript.chunkSeconds);
+    liveTdrz.value = s.liveTranscript.tdrzModelPath ?? '';
     for (const [input, path] of [[mongoUri, 'library.mongoUri'], [allowRemote, 'library.allowRemote'], [globalShortcut, 'globalShortcut']] as const) {
       input.disabled = view.overriddenByEnv.includes(path);
       input.title = input.disabled ? 'Set by an INVI_* environment variable for this run' : '';
@@ -189,6 +199,12 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     if (tv !== s.tts.voice) patch.tts = { ...patch.tts, voice: tv };
     const cp = Number(companionPort.value);
     if (!view.overriddenByEnv.includes('companion.port') && cp !== s.companion.port) patch.companion = { port: cp };
+    const ls = liveSource.value.trim() || null;
+    if (ls !== s.liveTranscript.source) patch.liveTranscript = { ...patch.liveTranscript, source: ls };
+    const lc = Number(liveChunk.value);
+    if (lc !== s.liveTranscript.chunkSeconds) patch.liveTranscript = { ...patch.liveTranscript, chunkSeconds: lc };
+    const lt = liveTdrz.value.trim() || null;
+    if (lt !== s.liveTranscript.tdrzModelPath) patch.liveTranscript = { ...patch.liveTranscript, tdrzModelPath: lt };
     view = await api.settings.update(patch);
     // Leave any shortcut field, so the next key press acts instead of being recorded.
     if (document.activeElement instanceof HTMLElement && panel.contains(document.activeElement)) document.activeElement.blur();
@@ -246,6 +262,11 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     el('h3', { text: 'Share to phone' }),
     field('Port', companionPort),
     el('span', { className: 'field-note', text: 'The LAN port your phone connects to. A fixed port means you add a firewall rule only once; set it to 0 for a random port each time. If your phone can’t connect, the exact firewall command is shown in the Share panel while sharing.' }),
+    el('h3', { text: 'Live transcript (local)' }),
+    field('Capture source', liveSource),
+    field('Chunk seconds (3–30)', liveChunk),
+    field('Speaker-turn model (tinydiarize)', liveTdrz),
+    el('span', { className: 'field-note', text: 'Transcribes the meeting audio playing on this machine, locally. For speaker-turn labels, download the whisper tinydiarize model (~465MB) into <data dir>/models/: curl -L -o ~/.config/inviterminal/models/ggml-small.en-tdrz.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en-tdrz.bin' }),
     el('div', { className: 'lib-actions' }, button('Save', save, say), button('Revert', () => load(), say)),
     message,
   );

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseTranscript, WhisperStt, type SttPaths } from '../src/main/audio/WhisperStt';
+import { parseDiarizedTranscript, parseTranscript, WhisperStt, type SttPaths } from '../src/main/audio/WhisperStt';
 import { encodeWav } from '../src/shared/wav';
 
 const MODEL = process.env.INVI_WHISPER_MODEL ?? join(homedir(), '.config/inviterminal/models/ggml-base.en.bin');
@@ -20,6 +20,21 @@ describe('parseTranscript', () => {
   });
   it('is empty for empty output', () => {
     expect(parseTranscript('\n  \n')).toBe('');
+  });
+  it('strips tinydiarize [SPEAKER_TURN] markers from the plain text', () => {
+    expect(parseTranscript('Hello there [SPEAKER_TURN] how are you')).toBe('Hello there how are you');
+  });
+});
+
+describe('parseDiarizedTranscript', () => {
+  it('splits the text into speaker-turn segments on [SPEAKER_TURN]', () => {
+    expect(parseDiarizedTranscript(' What is your name? [SPEAKER_TURN] My name is Sam. ')).toEqual(['What is your name?', 'My name is Sam.']);
+  });
+  it('returns a single segment when there is no turn marker', () => {
+    expect(parseDiarizedTranscript('load_backend: x\n One speaker only.')).toEqual(['One speaker only.']);
+  });
+  it('drops empty segments', () => {
+    expect(parseDiarizedTranscript('[SPEAKER_TURN] hi [SPEAKER_TURN] [SPEAKER_TURN] bye')).toEqual(['hi', 'bye']);
   });
 });
 

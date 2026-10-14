@@ -227,8 +227,8 @@ export interface RendererApi {
   };
   live: {
     status(): Promise<LiveTranscriptStatus>;
-    /** Start live transcription of the call audio. `consent` must be true (everyone informed). */
-    start(consent: boolean): Promise<LiveTranscriptStatus>;
+    /** Start live transcription of the call audio. `consent` must be true (everyone informed). `diarize` labels speaker turns. */
+    start(consent: boolean, diarize?: boolean): Promise<LiveTranscriptStatus>;
     stop(): Promise<void>;
     onStatus(cb: (s: LiveTranscriptStatus) => void): void;
     onLine(cb: (line: LiveLine) => void): void;

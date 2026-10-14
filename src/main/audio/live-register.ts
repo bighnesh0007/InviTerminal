@@ -4,7 +4,7 @@ import { IPC } from '../../shared/ipc';
 import { isFromWindow } from '../ipc-guard';
 import type { LiveTranscriptController } from './LiveTranscriptController';
 
-const StartRequest = z.object({ consent: z.boolean() }).strict();
+const StartRequest = z.object({ consent: z.boolean(), diarize: z.boolean().optional() }).strict();
 
 /** Live-transcript IPC: start is consent-gated; status/lines/errors stream to the renderer. */
 export function registerLiveIpc(getWin: () => BrowserWindow | null, live: LiveTranscriptController): void {
@@ -17,8 +17,8 @@ export function registerLiveIpc(getWin: () => BrowserWindow | null, live: LiveTr
   });
   ipcMain.handle(IPC.liveStart, async (e, raw: unknown) => {
     guard(e);
-    const { consent } = StartRequest.parse(raw);
-    return live.start(consent);
+    const { consent, diarize } = StartRequest.parse(raw);
+    return live.start(consent, diarize ?? false);
   });
   ipcMain.handle(IPC.liveStop, async (e) => {
     guard(e);

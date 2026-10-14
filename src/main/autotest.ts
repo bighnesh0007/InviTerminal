@@ -875,13 +875,16 @@ export async function liveTranscriptAutotest(win: BrowserWindow, controller: Pro
     const startDisabledNoConsent = await js<boolean>(`document.querySelector('.live-panel .lib-actions button').disabled`);
     log('consent-gate', { startDisabledWithoutConsent: startDisabledNoConsent });
 
-    await js(`document.querySelector('.live-consent input').click()`); // give consent
+    // Give consent and enable speaker-turn labels (the fake diarizer reports available).
+    await js(`document.querySelectorAll('.live-consent input')[0].click()`); // consent
+    await js(`document.querySelectorAll('.live-consent input')[1].click()`); // diarize
     await sleep(100);
     await clickIn('.live-panel .lib-actions', 'Start transcribing');
 
     const gotLines = await waitFor(async () => (await lines()).length >= 2);
     const seen = await lines();
-    log('transcribing', { gotLines, lineCount: seen.length, first: seen[0], badge: await js<string>(`document.querySelector('.live-badge').textContent`) });
+    const speakers = await js<string[]>(`[...document.querySelectorAll('.live-feed .live-speaker')].map(e => e.textContent)`);
+    log('transcribing', { gotLines, lineCount: seen.length, first: seen[0], speakers: speakers.slice(0, 3), badge: await js<string>(`document.querySelector('.live-badge').textContent`) });
 
     // Behind the gate: removing protection conceals the panel.
     await controller.unprotect();

@@ -145,4 +145,5 @@ textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; 
 .live-feed { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
 .live-line { display: flex; gap: 8px; align-items: baseline; }
 .live-time { font-family: ui-monospace, monospace; font-size: 10px; color: var(--muted); flex: none; }
+.live-speaker { font-size: 10px; font-weight: 700; color: #7fd69d; text-transform: uppercase; flex: none; min-width: 64px; }
 .live-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }

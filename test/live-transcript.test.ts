@@ -49,9 +49,17 @@ describe('isSilenceTranscript', () => {
 
 const okStt = (): SttStatus => ({ available: true, binary: 'whisper-cli', binaryFound: true, model: 'm', modelFound: true, reason: null });
 
-function fakeTranscriber(script: string[]): Transcriber {
+function fakeTranscriber(script: string[], turns?: string[][]): Transcriber {
   let i = 0;
-  return { status: okStt, transcribe: async () => ({ text: script[i++ % script.length]!, ms: 1 }) };
+  return {
+    status: okStt,
+    diarizeStatus: () => ({ available: turns !== undefined, model: 'tdrz', reason: turns ? null : 'no diarize model' }),
+    transcribe: async (_w, o) => {
+      const idx = i++;
+      const text = script[idx % script.length]!;
+      return o?.diarize && turns ? { text, ms: 1, turns: turns[idx % turns.length]! } : { text, ms: 1 };
+    },
+  };
 }
 
 /** A capture we can push bytes into from the test. */
@@ -83,7 +91,7 @@ describe('LiveTranscriptController', () => {
   });
 
   it('refuses when speech-to-text is unavailable', async () => {
-    const stt: Transcriber = { status: () => ({ available: false, binary: 'whisper-cli', binaryFound: false, model: 'm', modelFound: false, reason: 'model missing' }), transcribe: async () => ({ text: '', ms: 0 }) };
+    const stt: Transcriber = { status: () => ({ available: false, binary: 'whisper-cli', binaryFound: false, model: 'm', modelFound: false, reason: 'model missing' }), diarizeStatus: () => ({ available: false, model: '', reason: 'no model' }), transcribe: async () => ({ text: '', ms: 0 }) };
     const ctl = new LiveTranscriptController(stt, manualCapture().start, () => 's', () => 1, emitSpy());
     await expect(ctl.start(true)).rejects.toThrow(/model missing/);
   });
@@ -115,5 +123,36 @@ describe('LiveTranscriptController', () => {
     expect(ctl.isActive).toBe(false);
     expect(cap.killed()).toBe(true);
     expect(ctl.status().active).toBe(false);
+  });
+
+  it('labels speaker turns, alternating within a chunk, when diarizing', async () => {
+    const cap = manualCapture();
+    const spy = emitSpy();
+    // One chunk diarizes into two turns → two labelled lines.
+    const stt = fakeTranscriber(['Q and A'], [['What is your name?', 'My name is Sam.']]);
+    const ctl = new LiveTranscriptController(stt, cap.start, () => 'src.monitor', () => 1, spy);
+    expect(ctl.status().diarizeAvailable).toBe(true);
+    await ctl.start(true, true);
+    expect(ctl.status().diarizing).toBe(true);
+
+    cap.feed(new Uint8Array(96_000));
+    await vi.waitFor(() => expect(spy.lines.length).toBe(2));
+    expect(spy.lines.map((l) => [l.speaker, l.text])).toEqual([
+      ['Speaker 1', 'What is your name?'],
+      ['Speaker 2', 'My name is Sam.'],
+    ]);
+  });
+
+  it('does not diarize when the tdrz model is unavailable, even if requested', async () => {
+    const cap = manualCapture();
+    const spy = emitSpy();
+    const stt = fakeTranscriber(['one speaker line']); // no turns → diarize unavailable
+    const ctl = new LiveTranscriptController(stt, cap.start, () => 'src.monitor', () => 1, spy);
+    expect(ctl.status().diarizeAvailable).toBe(false);
+    await ctl.start(true, true); // request diarize, but it's unavailable
+    expect(ctl.status().diarizing).toBe(false);
+    cap.feed(new Uint8Array(96_000));
+    await vi.waitFor(() => expect(spy.lines.length).toBe(1));
+    expect(spy.lines[0]!.speaker).toBeUndefined();
   });
 });

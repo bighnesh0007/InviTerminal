@@ -30,10 +30,15 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
 
   let sttReady = false;
   let active = false;
+  let diarizeAvailable = false;
 
   const consent = Object.assign(el('input'), { type: 'checkbox' });
   const consentLabel = el('label', { className: 'live-consent' }, consent, el('span', { text: 'Everyone in the call has been told it is being transcribed on my machine.' }));
   consent.addEventListener('change', () => setControls());
+
+  const diarize = Object.assign(el('input'), { type: 'checkbox' });
+  const diarizeNote = el('span', { className: 'field-note' });
+  const diarizeLabel = el('label', { className: 'live-consent' }, diarize, el('span', { text: '🗣 Label speaker turns' }), diarizeNote);
 
   const startBtn = button('Start transcribing', () => start(), say);
   const stopBtn = button('Stop', () => stop(), say);
@@ -43,16 +48,21 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     stopBtn.hidden = !active;
     startBtn.disabled = active || !sttReady || !consent.checked;
     consent.disabled = active;
+    diarize.disabled = active || !diarizeAvailable;
+    diarizeNote.textContent = diarizeAvailable ? '' : ' — needs the speaker model (Settings → Live transcript)';
   }
 
   function line(l: LiveLine): void {
-    const row = el('div', { className: 'live-line' }, el('span', { className: 'live-time', text: new Date(l.at).toLocaleTimeString() }), el('span', { className: 'live-text', text: l.text }));
-    feed.append(row);
+    const parts = [el('span', { className: 'live-time', text: new Date(l.at).toLocaleTimeString() })];
+    if (l.speaker) parts.push(el('span', { className: 'live-speaker', text: l.speaker }));
+    parts.push(el('span', { className: 'live-text', text: l.text }));
+    feed.append(el('div', { className: 'live-line' }, ...parts));
     feed.scrollTop = feed.scrollHeight;
   }
 
   function render(s: LiveTranscriptStatus): void {
     active = s.active;
+    diarizeAvailable = s.diarizeAvailable;
     badge.hidden = !s.active;
     badge.textContent = `● Live · ${s.lines} line${s.lines === 1 ? '' : 's'}`;
     if (s.reason && !s.active) statusLine.textContent = `Not ready — ${s.reason}`;
@@ -66,7 +76,7 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     say('');
     feed.replaceChildren();
     try {
-      render(await api.live.start(consent.checked));
+      render(await api.live.start(consent.checked, diarize.checked));
       say('Transcribing. Play the call through your speakers; text appears below.');
     } catch (e) {
       say((e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
@@ -91,6 +101,7 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     el('p', { className: 'field-note', text: 'Transcribes the call/meeting audio playing on this computer, locally, and shows it here. Off by default; a visible "● Live" indicator shows while on. Audio stays on your machine.' }),
     statusLine,
     consentLabel,
+    diarizeLabel,
     el('div', { className: 'lib-actions' }, startBtn, stopBtn),
     feed,
     message,

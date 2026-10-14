@@ -2,6 +2,8 @@ import { app, type BrowserWindow, ipcMain, Menu, nativeImage, Tray } from 'elect
 import path from 'node:path';
 import { IPC } from '../../shared/ipc';
 import { isFromWindow } from '../ipc-guard';
+import type { AudioStatus } from '../../shared/audio';
+import { AUDIO_KIND_LABEL } from '../../shared/audio';
 import { parseCliAction } from './cli';
 import { VisibilityController } from './VisibilityController';
 
@@ -34,6 +36,8 @@ export interface VisibilityWiring {
   tray: Tray | null;
   /** Runs a command-line action as if a second instance had sent it. */
   handleArgv(argv: readonly string[]): void;
+  /** Updates the tray tooltip/menu to reflect a live mic recording (persistent indicator). */
+  setRecording(status: AudioStatus, onStop: () => void): void;
 }
 
 export function registerVisibility(win: BrowserWindow): VisibilityWiring {
@@ -55,23 +59,27 @@ export function registerVisibility(win: BrowserWindow): VisibilityWiring {
   });
 
   let tray: Tray | null = null;
+  const refreshTray = (rec?: { status: AudioStatus; onStop: () => void }) => {
+    if (!tray) return;
+    const recording = rec?.status.active ?? false;
+    // The indicator is deliberately visible in a shared screen — the point is that recording is never hidden.
+    tray.setToolTip(recording ? `InviTerminal — ● recording (${AUDIO_KIND_LABEL[rec!.status.kind!]})` : 'InviTerminal');
+    const items: Electron.MenuItemConstructorOptions[] = [
+      { label: 'Show / Hide', click: () => void controller.toggle() },
+      { label: 'Hide now', click: () => void controller.hide('panic') },
+    ];
+    if (recording) items.push({ type: 'separator' }, { label: '● Stop recording', click: () => rec!.onStop() });
+    items.push({ type: 'separator' }, { label: 'Quit', click: () => app.quit() });
+    tray.setContextMenu(Menu.buildFromTemplate(items));
+  };
   try {
     tray = new Tray(nativeImage.createFromPath(path.join(__dirname, '../assets/tray-icon.png')));
-    // Neutral on purpose: the tray icon and its tooltip are visible in a shared screen.
-    tray.setToolTip('InviTerminal');
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: 'Show / Hide', click: () => void controller.toggle() },
-        { label: 'Hide now', click: () => void controller.hide('panic') },
-        { type: 'separator' },
-        { label: 'Quit', click: () => app.quit() },
-      ]),
-    );
+    refreshTray();
     tray.on('click', () => void controller.toggle());
   } catch (e) {
     // No StatusNotifier host (or similar): the app still works through the CLI and the window.
     console.warn(`Tray unavailable: ${(e as Error).message}`);
   }
 
-  return { controller, tray, handleArgv };
+  return { controller, tray, handleArgv, setRecording: (status, onStop) => refreshTray(status.active ? { status, onStop } : undefined) };
 }

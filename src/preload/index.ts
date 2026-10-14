@@ -3,6 +3,7 @@ import type { CanarySequence } from '../shared/canary';
 import { type ConcealRequest, IPC, type RendererApi, type ScreencastReport } from '../shared/ipc';
 import type { ProtectionState } from '../shared/protection';
 import type { AiStatus } from '../shared/ai';
+import type { AudioStatus } from '../shared/audio';
 import type { SettingsView } from '../shared/settings';
 import type { LibraryStatus } from '../shared/snippet';
 
@@ -96,6 +97,15 @@ const api: RendererApi = {
     onExplainCancelled: (cb) => {
       ipcRenderer.on(IPC.aiExplainCancelled, (_e, m: string) => cb(m));
     },
+  },
+  audio: {
+    status: () => ipcRenderer.invoke(IPC.audioStatus),
+    onStatus: (cb) => {
+      ipcRenderer.on(IPC.audioStatusChanged, (_e, s: AudioStatus) => cb(s));
+    },
+    start: (kind) => ipcRenderer.invoke(IPC.audioStart, { kind }),
+    stop: () => ipcRenderer.invoke(IPC.audioStop),
+    consentToMeeting: () => ipcRenderer.invoke(IPC.audioConsentMeeting),
   },
 };
 

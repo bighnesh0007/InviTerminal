@@ -690,3 +690,64 @@ export async function aiExplainAutotest(win: BrowserWindow, manager: PtyManager,
   }
   win.close();
 }
+
+/** Phase 7c: the microphone permission gate and recording indicator. Drives real getUserMedia. */
+export async function micGateAutotest(win: BrowserWindow, audio: { micAllowed: boolean }): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  // Returns {ok, tracks} or {ok:false, name}. Always stops tracks so the mic never stays on.
+  const gum = (c: string) =>
+    js<{ ok: boolean; tracks?: number; name?: string }>(
+      `navigator.mediaDevices.getUserMedia(${c}).then(s => { const n = s.getTracks().length; s.getTracks().forEach(t => t.stop()); return { ok: true, tracks: n }; }, e => ({ ok: false, name: e.name }))`,
+    );
+  try {
+    await until('renderer', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
+
+    // 1) Mic denied before any session.
+    const beforeAudio = await gum('{ audio: true }');
+    const beforeVideo = await gum('{ video: true }');
+    log('before-session', { micAllowedMain: audio.micAllowed, audio: beforeAudio, video: beforeVideo });
+
+    // 2) Start a session → mic allowed; video still denied.
+    const startErr = await js<string | null>(`window.inviterminal.audio.start('mic-test')`);
+    await sleep(200);
+    const duringAudio = await gum('{ audio: true }');
+    const duringVideo = await gum('{ video: true }');
+    const st = await js<{ active: boolean; kind: string | null }>(`window.inviterminal.audio.status()`);
+    const badgeShown = await js<boolean>(`!document.querySelector('.rec-badge').hidden`);
+    const badgeText = await js<string>(`document.querySelector('.rec-badge').textContent`);
+    log('during-session', { startError: startErr, micAllowedMain: audio.micAllowed, status: st, audio: duringAudio, videoStillDenied: duringVideo, badgeShown, badgeText });
+    if (process.env.INVI_SNAPSHOT_PATH) {
+      await writeFile(process.env.INVI_SNAPSHOT_PATH, (await win.webContents.capturePage()).toPNG());
+    }
+    // The tray indicator must survive a panic-hide (recording is never silently hidden).
+    const ours = await new Promise<string>((res) => execFile('gdbus', ['call', '--session', '--dest', 'org.kde.StatusNotifierWatcher', '--object-path', '/StatusNotifierWatcher', '--method', 'org.freedesktop.DBus.Properties.Get', 'org.kde.StatusNotifierWatcher', 'RegisteredStatusNotifierItems'], (_e, out) => res(out || '')));
+    const item = [...ours.matchAll(/'([^']+)'/g)].map((m) => m[1]!).find((i) => i.includes(`-${process.pid}-`));
+    let tooltip = '';
+    if (item) {
+      const slash = item.indexOf('/');
+      tooltip = await new Promise<string>((res) => execFile('gdbus', ['call', '--session', '--dest', item.slice(0, slash), '--object-path', item.slice(slash), '--method', 'org.freedesktop.DBus.Properties.Get', 'org.kde.StatusNotifierItem', 'ToolTip'], (_e, out) => res(out || '')));
+    }
+    win.hide();
+    await sleep(400);
+    log('during-hide', { stillRecording: audio.micAllowed, trayTooltipMentionsRecording: /recording/i.test(tooltip), trayTooltip: tooltip.replace(/\s+/g, ' ').slice(0, 120) });
+    win.show();
+    await sleep(200);
+
+    // 3) Stop → mic denied again, badge gone.
+    await js(`window.inviterminal.audio.stop()`);
+    await sleep(200);
+    const afterAudio = await gum('{ audio: true }');
+    const badgeAfter = await js<boolean>(`!document.querySelector('.rec-badge').hidden`);
+    log('after-stop', { micAllowedMain: audio.micAllowed, audio: afterAudio, badgeShown: badgeAfter });
+
+    // 4) Meeting recording needs consent first.
+    const meetingNoConsent = await js<string | null>(`window.inviterminal.audio.start('meeting')`);
+    await js(`window.inviterminal.audio.consentToMeeting()`);
+    const meetingWithConsent = await js<string | null>(`window.inviterminal.audio.start('meeting')`);
+    await js(`window.inviterminal.audio.stop()`);
+    log('meeting-consent', { withoutConsent: meetingNoConsent, withConsent: meetingWithConsent });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}

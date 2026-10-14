@@ -7,6 +7,7 @@ import { mountLibrary } from './library';
 import { actionForEvent, canonicalChord, DEFAULT_KEYMAP, type AppAction, type Keymap } from '../shared/keymap';
 import { DEFAULT_SETTINGS, type SettingsView } from '../shared/settings';
 import { mountAiPanel } from './ai-panel';
+import { mountAudioPanel } from './audio-panel';
 import { mountSettings } from './settings';
 import { mountTabs } from './tabs';
 
@@ -109,7 +110,7 @@ function renderMain(): void {
   termWrap.prepend(tabs.bar);
 
   const panelChanged = () => {
-    const anyOpen = library.isOpen() || settingsPanel.isOpen() || aiPanel.isOpen();
+    const anyOpen = library.isOpen() || settingsPanel.isOpen() || aiPanel.isOpen() || audioPanel.isOpen();
     termWrap.classList.toggle('lib-open', anyOpen);
     requestAnimationFrame(() => {
       tabs.fit();
@@ -147,7 +148,17 @@ function renderMain(): void {
       const v = tabs.active();
       return { selection: v?.getSelectionText() ?? '', viewport: v?.getViewportText() ?? '' };
     });
-  termWrap.append(library.element, settingsPanel.element, aiPanel.element);
+  const audioPanel = mountAudioPanel(api, {
+    onOpenChange: (open) => {
+      if (open) {
+        if (library.isOpen()) library.toggle();
+        settingsPanel.close();
+        aiPanel.close();
+      }
+      panelChanged();
+    },
+  });
+  termWrap.append(library.element, settingsPanel.element, aiPanel.element, audioPanel.element);
 
   gate.append(
     button('Show anyway', () => {
@@ -170,6 +181,7 @@ function renderMain(): void {
     library.element.classList.toggle('concealed', !show);
     settingsPanel.element.classList.toggle('concealed', !show);
     aiPanel.element.classList.toggle('concealed', !show);
+    audioPanel.element.classList.toggle('concealed', !show);
     tabs.bar.classList.toggle('concealed', !show);
     // Nothing behind the cover may keep keyboard focus (e.g. the snippet search box).
     if (!show && document.activeElement instanceof HTMLElement && termWrap.contains(document.activeElement)) document.activeElement.blur();
@@ -249,8 +261,9 @@ function renderMain(): void {
   const hideButton = button('Hide', () => api.visibility.panicHide());
   const libraryButton = button('Snippets', () => library.toggle());
   const explainButton = button('Explain', () => explainSelection());
+  const micButton = button('Mic', () => audioPanel.toggle());
   const settingsButton = button('Settings', () => settingsPanel.toggle());
-  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), explainButton, libraryButton, settingsButton, hideButton, drawerToggle), drawer, termWrap);
+  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, audioPanel.badge, el('span', { className: 'spacer' }), explainButton, micButton, libraryButton, settingsButton, hideButton, drawerToggle), drawer, termWrap);
 
   // Button tooltips show the current shortcuts.
   const showChords = () => {

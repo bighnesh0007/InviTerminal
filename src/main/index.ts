@@ -5,7 +5,7 @@ import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'n
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { aiExplainAutotest, aiKeyAutotest, captureAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { aiExplainAutotest, aiKeyAutotest, captureAutotest, micGateAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -21,6 +21,8 @@ import { PtyManager } from './terminal/PtyManager';
 import { registerTerminalIpc } from './terminal/register';
 import { detectShellProfiles } from './terminal/shells';
 import { registerVisibility } from './visibility/register';
+import { AudioController } from './audio/AudioController';
+import { registerAudioIpc } from './audio/register';
 import { AnthropicClient } from './ai/AnthropicClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
@@ -67,13 +69,23 @@ if (startupGlobalShortcut && process.platform === 'linux' && sessionEnv.XDG_SESS
 
 let mainWin: BrowserWindow | null = null;
 let runner: SelfTestRunner | null = null;
+const audio = new AudioController();
 
 function hardenSession(): void {
   const s = session.defaultSession;
-  // Deny every permission except screen capture while a screencast self-test is running.
-  const allowed = (permission: string) => (permission === 'display-capture' || permission === 'media') && runner?.screencastActive === true;
-  s.setPermissionRequestHandler((_wc, permission, cb) => cb(allowed(permission)));
-  s.setPermissionCheckHandler((_wc, permission) => allowed(permission));
+  // Screen capture is allowed only during a screencast self-test.
+  const screencastOk = (permission: string) => (permission === 'display-capture' || permission === 'media') && runner?.screencastActive === true;
+  // The microphone is allowed ONLY while an audio session is active, and never for video.
+  const MIC_PERMS = new Set(['media', 'microphone', 'audioCapture']);
+  const micOk = (permission: string, wantsVideo: boolean) => MIC_PERMS.has(permission) && audio.micAllowed && !wantsVideo;
+  s.setPermissionRequestHandler((_wc, permission, cb, details) => {
+    const wantsVideo = ((details as { mediaTypes?: string[] } | undefined)?.mediaTypes ?? []).includes('video');
+    cb(screencastOk(permission) || micOk(permission, wantsVideo));
+  });
+  s.setPermissionCheckHandler((_wc, permission, _origin, details) => {
+    const wantsVideo = (details as { mediaType?: string } | undefined)?.mediaType === 'video';
+    return screencastOk(permission) || micOk(permission, wantsVideo);
+  });
   s.setDisplayMediaRequestHandler((_req, callback) => {
     if (!runner?.screencastActive) {
       callback({});
@@ -227,6 +239,13 @@ app.whenReady().then(async () => {
   runner = new SelfTestRunner(win, () => createWindow('control', { title: config.controlTitle, width: 640, height: 260 }));
   const r = runner;
   const visibility = registerVisibility(win);
+  registerAudioIpc(() => mainWin, audio);
+  audio.onChange((st) => {
+    if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.audioStatusChanged, st);
+    visibility.setRecording(st, () => audio.stop());
+  });
+  // If the window is destroyed while recording, stop the mic (no orphaned capture).
+  win.on('closed', () => audio.stop());
 
   // register() returning true is not proof the key works (with the portal, the user has not even
   // confirmed yet); firedCount is what the autotest checks.
@@ -249,6 +268,7 @@ app.whenReady().then(async () => {
     if (first && tap && autotest === 'settings-readback') void done.then(() => settingsReadbackAutotest(win, tap, () => settings.view()));
     if (first && autotest === 'ai-key') void done.then(() => aiKeyAutotest(win, settings.path, app.getPath('userData')));
     if (first && tap && autotest === 'ai-explain') void done.then(() => aiExplainAutotest(win, manager, tap, controller));
+    if (first && autotest === 'mic-gate') void done.then(() => micGateAutotest(win, audio));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {

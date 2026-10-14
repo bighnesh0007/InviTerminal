@@ -1,6 +1,7 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
 import type { AiStatus } from './ai';
+import type { AudioKind, AudioStatus } from './audio';
 import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
 
@@ -67,6 +68,12 @@ export const IPC = {
   aiExplainError: 'ai:explain-error',
   /** main → renderer */
   aiExplainCancelled: 'ai:explain-cancelled',
+  audioStatus: 'audio:status',
+  audioStart: 'audio:start',
+  audioStop: 'audio:stop',
+  audioConsentMeeting: 'audio:consent-meeting',
+  /** main → renderer */
+  audioStatusChanged: 'audio:status-changed',
 } as const;
 
 export interface ConcealRequest {
@@ -167,5 +174,13 @@ export interface RendererApi {
     onExplainDone(cb: (full: string) => void): void;
     onExplainError(cb: (message: string) => void): void;
     onExplainCancelled(cb: (message: string) => void): void;
+  };
+  audio: {
+    status(): Promise<AudioStatus>;
+    onStatus(cb: (s: AudioStatus) => void): void;
+    /** Starts a session (flips the mic permission on). Returns null, or an error message. */
+    start(kind: AudioKind): Promise<string | null>;
+    stop(): Promise<void>;
+    consentToMeeting(): Promise<void>;
   };
 }

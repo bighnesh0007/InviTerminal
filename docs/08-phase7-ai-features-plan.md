@@ -1,6 +1,6 @@
 ---
 type: decision-record
-status: 7a + 7b (explain feature) built and verified; 7c (audio) next
+status: 7a + 7b + 7c (mic gate) built and verified; 7d (local STT) next
 verified-on: 2026-10-14
 ---
 
@@ -309,6 +309,30 @@ is **not** masked. That is why the confirm-preview exists — the user sees exac
 be sent — and why the UI calls the redactor "best-effort, not a guarantee". The first
 autotest canary was shapeless and (correctly) not masked; it was changed to a shaped secret
 to assert authoritative redaction.
+
+## 7c — Done (2026-10-14): microphone permission gate + recording indicator
+
+Built and verified:
+- **`AudioController`** (`src/main/audio/AudioController.ts`): tracks whether a mic session
+  is active; the permission handler reads `micAllowed`. A **meeting** recording (which would
+  capture other people) additionally requires a one-time `consentToMeeting()` this session.
+- **Permission gate** (`index.ts hardenSession`): `getUserMedia({audio})` is allowed **only**
+  while a session is active, and **video is never allowed** (camera stays off). Screen-capture
+  stays gated to the screencast self-test, unchanged.
+- **Indicator**: a red "● REC — <kind> <mm:ss>" badge in the header (not concealable — it
+  lives in the header, outside the gated area), and a tray tooltip "InviTerminal — ● recording
+  (<kind>)" with a "● Stop recording" menu item. The window closing stops the mic.
+- **Mic panel** (`src/renderer/audio-panel.ts`): Start/Stop a mic test with a live input-level
+  meter. No transcription or saving yet (7d).
+
+Verified: 6 `AudioController` unit tests; 173 tests total; `npm audit --omit=dev` 0; capture
+regression passes (the permission change didn't affect the screenshot path). **Live
+(`INVI_AUTOTEST=mic-gate`):** before a session, `getUserMedia({audio})` and `{video}` both
+**NotAllowedError**; during a session, audio opens (**1 real track**) while **video is still
+denied**, and the badge reads "● REC — Microphone test"; after stop, audio is denied again and
+the badge is gone; a **meeting** start is refused until consent, then allowed. Over D-Bus, the
+tray tooltip reads "InviTerminal — ● recording (Microphone test)" and **recording survives a
+window hide** (the indicator is never silently hidden). Screenshot in `docs/`.
 
 ## 7. Decisions (made 2026-10-14)
 

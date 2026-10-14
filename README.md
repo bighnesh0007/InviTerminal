@@ -8,7 +8,7 @@ mainstream screen shares and recordings on supported desktops. It does nothing
 about cameras, remote desktop, compromised machines, accessibility APIs or the
 clipboard. See [docs/01-feasibility-and-architecture.md](docs/01-feasibility-and-architecture.md) §2.5.
 
-## Status — Phase 6 (Linux packaging)
+## Status — Phase 7 (AI features on Groq)
 
 | Platform | Status |
 |---|---|
@@ -22,16 +22,33 @@ keystrokes are not sent, until the compositor confirms exclusion. Every hide fir
 the terminal: a re-shown window is a new compositor window that stays capturable for
 about 150 ms until protection is re-applied.
 
-The **snippet library** (Ctrl+Shift+L) stores snippets in MongoDB: by default its own
-`inviterminal` database on the local server, and never a remote one unless you allow it.
-**Insert** pastes into the terminal without a newline, so nothing runs until you press
-Enter. Multi-line snippets ask first.
+The **snippet library** (Ctrl+Shift+L) stores snippets in MongoDB (its own `inviterminal`
+database on the local server; never remote unless you allow it). **Insert** pastes without a
+newline, so nothing runs until you press Enter.
+
+**AI features** (optional, need a free [Groq](https://console.groq.com) key in Settings):
+- **Explain output** (Ctrl+Shift+E) — selected terminal text → Groq, streamed into a side
+  panel, behind a confirm-preview that masks obvious secrets. Nothing is sent until you confirm.
+- **Microphone + local transcription** — off by default, a red REC badge + tray indicator
+  while live; whisper.cpp transcribes **on your machine** and the audio is deleted (never uploaded).
+- **Interview practice** — the model asks questions, you answer aloud (local transcription) or
+  by typing, and it gives feedback.
 
 Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 [Phase 3](docs/04-phase3-visibility-results.md) ·
 [Phase 4](docs/05-phase4-library-results.md) ·
 [Phase 5](docs/06-phase5-settings-tabs-results.md) ·
-[Phase 6](docs/07-phase6-packaging-results.md).
+[Phase 6](docs/07-phase6-packaging-results.md) ·
+[Phase 7](docs/08-phase7-ai-features-plan.md).
+
+### Verified vs. not
+
+- **Verified live on KDE Plasma (Wayland):** capture exclusion (screenshot path), terminal,
+  show/hide + tray + panic key, global shortcut, snippet library, settings/tabs, packaging
+  (AppImage + Arch), local speech-to-text, and the AI flows with stub models.
+- **Not yet verified (need you, or hardware):** the portal screencast / Google Meet checks;
+  real Groq calls (add your key, then Settings → Test key); the global-shortcut restart /
+  double-fire follow-ups; and Windows (needs a Windows machine).
 
 **Settings** (Ctrl+Shift+Comma) live in `settings.json` in the app data directory
 (`~/.config/inviterminal/` by default, mode 0600). Font, scrollback, the shell for new

@@ -8,7 +8,9 @@ import { parseTranscript, WhisperStt, type SttPaths } from '../src/main/audio/Wh
 import { encodeWav } from '../src/shared/wav';
 
 const MODEL = process.env.INVI_WHISPER_MODEL ?? join(homedir(), '.config/inviterminal/models/ggml-base.en.bin');
-const JFK = join('/tmp/claude-1000/-home-bighnesh-Desktop-Projects-invierminal-InviTerminal/b283fc0a-f41a-4ad0-97d9-a0939ad254ca/scratchpad', 'jfk.wav');
+// Env-gated so the committed test is reproducible: set INVI_WHISPER_SAMPLE to a speech WAV
+// (the whisper.cpp jfk.wav sample) to run the real integration tests; otherwise they skip.
+const JFK = process.env.INVI_WHISPER_SAMPLE ?? '';
 
 const paths = (over: Partial<SttPaths> = {}): (() => SttPaths) => () => ({ binaryPath: null, modelPath: MODEL, defaultModelPath: '/nonexistent/model.bin', ...over });
 
@@ -52,7 +54,7 @@ describe('WhisperStt.transcribe with a fake runner', () => {
 });
 
 // Real binary + model on the dev machine; skipped automatically if either is missing.
-const canRunReal = existsSync(MODEL) && existsSync(JFK);
+const canRunReal = existsSync(MODEL) && JFK !== '' && existsSync(JFK);
 describe.skipIf(!canRunReal)('WhisperStt.transcribe (real whisper-cli + base.en on jfk.wav)', () => {
   it('transcribes the sample correctly', async () => {
     const stt = new WhisperStt(paths());

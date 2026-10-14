@@ -22,6 +22,12 @@ export interface Settings {
     /** Model for the explain/assist features. The API key is NOT here — it lives in the OS keychain. */
     model: AiModel;
   };
+  stt: {
+    /** Path to a whisper.cpp ggml model, or null for the default in the data dir. */
+    modelPath: string | null;
+    /** Path to the whisper-cli binary, or null to use it from PATH. */
+    binaryPath: string | null;
+  };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -31,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   library: { mongoUri: DEFAULT_MONGODB_URI, allowRemote: false },
   globalShortcut: null,
   ai: { model: DEFAULT_AI_MODEL },
+  stt: { modelPath: null, binaryPath: null },
 };
 
 export type SettingsPatch = {
@@ -39,6 +46,7 @@ export type SettingsPatch = {
   library?: Partial<Settings['library']>;
   globalShortcut?: string | null;
   ai?: Partial<Settings['ai']>;
+  stt?: Partial<Settings['stt']>;
 };
 
 export interface SettingsView {

@@ -62,6 +62,9 @@ Default keys (all in-app keys are configurable in Settings):
 - Node.js 22+, plus `python3`, `make` and `g++` (node-pty compiles from source on Linux)
 - MongoDB for the snippet library. Defaults to `mongodb://127.0.0.1:27017/inviterminal`;
   the terminal works without it
+- *(optional, AI features)* an Anthropic API key (set in Settings) for "Explain output";
+  `whisper-cli` + a ggml model for local speech-to-text. Audio is transcribed locally and
+  never uploaded; terminal text is sent to Anthropic only after a confirm-preview
 
 ## Configuration
 

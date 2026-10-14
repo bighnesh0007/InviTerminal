@@ -42,6 +42,13 @@ export const SettingsSchema = z
       .object({ model: z.enum(AI_MODELS).default(d.ai.model) })
       .strict()
       .prefault({}),
+    stt: z
+      .object({
+        modelPath: z.string().max(4096).nullable().default(d.stt.modelPath),
+        binaryPath: z.string().max(4096).nullable().default(d.stt.binaryPath),
+      })
+      .strict()
+      .prefault({}),
   })
   .strict();
 
@@ -53,5 +60,6 @@ export const SettingsPatchSchema = z
     library: z.object({ mongoUri: z.string().max(2000), allowRemote: z.boolean() }).partial().strict().optional(),
     globalShortcut: z.string().max(60).nullable().optional(),
     ai: z.object({ model: z.enum(AI_MODELS) }).partial().strict().optional(),
+    stt: z.object({ modelPath: z.string().max(4096).nullable(), binaryPath: z.string().max(4096).nullable() }).partial().strict().optional(),
   })
   .strict();

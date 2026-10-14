@@ -11,6 +11,8 @@ export interface EnvOverrides {
   mongoUri?: string;
   allowRemote?: boolean;
   globalShortcut?: string;
+  sttModelPath?: string;
+  sttBinaryPath?: string;
 }
 
 const FILE = 'settings.json';
@@ -70,6 +72,8 @@ export class SettingsStore {
     if (this.env.mongoUri !== undefined) s.library.mongoUri = this.env.mongoUri;
     if (this.env.allowRemote !== undefined) s.library.allowRemote = this.env.allowRemote;
     if (this.env.globalShortcut !== undefined) s.globalShortcut = this.env.globalShortcut;
+    if (this.env.sttModelPath !== undefined) s.stt.modelPath = this.env.sttModelPath;
+    if (this.env.sttBinaryPath !== undefined) s.stt.binaryPath = this.env.sttBinaryPath;
     return s;
   }
 
@@ -85,6 +89,8 @@ export class SettingsStore {
     if (this.env.mongoUri !== undefined) overriddenByEnv.push('library.mongoUri');
     if (this.env.allowRemote !== undefined) overriddenByEnv.push('library.allowRemote');
     if (this.env.globalShortcut !== undefined) overriddenByEnv.push('globalShortcut');
+    if (this.env.sttModelPath !== undefined) overriddenByEnv.push('stt.modelPath');
+    if (this.env.sttBinaryPath !== undefined) overriddenByEnv.push('stt.binaryPath');
     const restartRequired = RESTART_PATHS.filter((k) => JSON.stringify(this.effective()[k]) !== JSON.stringify(this.startupValue(k)));
     return { effective: this.effective(), overriddenByEnv, restartRequired: [...restartRequired], file: this.path, loadWarning: this.loadWarning };
   }
@@ -106,6 +112,7 @@ export class SettingsStore {
         library: { ...this.stored.library, ...patch.library },
         globalShortcut: patch.globalShortcut !== undefined ? patch.globalShortcut : this.stored.globalShortcut,
         ai: { ...this.stored.ai, ...patch.ai },
+        stt: { ...this.stored.stt, ...patch.stt },
       };
       const result = SettingsSchema.safeParse(merged);
       if (!result.success) throw new Error(result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));

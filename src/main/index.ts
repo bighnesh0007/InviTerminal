@@ -3,9 +3,10 @@ import * as nodePty from 'node-pty';
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { aiExplainAutotest, aiKeyAutotest, captureAutotest, micGateAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { aiExplainAutotest, aiKeyAutotest, captureAutotest, micGateAutotest, sttAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -23,6 +24,8 @@ import { detectShellProfiles } from './terminal/shells';
 import { registerVisibility } from './visibility/register';
 import { AudioController } from './audio/AudioController';
 import { registerAudioIpc } from './audio/register';
+import { WhisperStt } from './audio/WhisperStt';
+import { registerSttIpc } from './audio/stt-register';
 import { AnthropicClient } from './ai/AnthropicClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
@@ -240,6 +243,12 @@ app.whenReady().then(async () => {
   const r = runner;
   const visibility = registerVisibility(win);
   registerAudioIpc(() => mainWin, audio);
+  const stt = new WhisperStt(() => ({
+    binaryPath: settings.effective().stt.binaryPath,
+    modelPath: settings.effective().stt.modelPath,
+    defaultModelPath: join(app.getPath('userData'), 'models', 'ggml-base.en.bin'),
+  }));
+  registerSttIpc(() => mainWin, stt);
   audio.onChange((st) => {
     if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.audioStatusChanged, st);
     visibility.setRecording(st, () => audio.stop());
@@ -269,6 +278,7 @@ app.whenReady().then(async () => {
     if (first && autotest === 'ai-key') void done.then(() => aiKeyAutotest(win, settings.path, app.getPath('userData')));
     if (first && tap && autotest === 'ai-explain') void done.then(() => aiExplainAutotest(win, manager, tap, controller));
     if (first && autotest === 'mic-gate') void done.then(() => micGateAutotest(win, audio));
+    if (first && autotest === 'stt') void done.then(() => sttAutotest(win));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {

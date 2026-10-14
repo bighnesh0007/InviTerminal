@@ -15,3 +15,12 @@ export const AUDIO_KIND_LABEL: Record<AudioKind, string> = {
   meeting: 'Meeting recording',
   'mic-test': 'Microphone test',
 };
+
+export interface SttStatus {
+  available: boolean;
+  binary: string;
+  binaryFound: boolean;
+  model: string;
+  modelFound: boolean;
+  reason: string | null;
+}

@@ -107,6 +107,10 @@ const api: RendererApi = {
     stop: () => ipcRenderer.invoke(IPC.audioStop),
     consentToMeeting: () => ipcRenderer.invoke(IPC.audioConsentMeeting),
   },
+  stt: {
+    status: () => ipcRenderer.invoke(IPC.sttStatus),
+    transcribe: (wav) => ipcRenderer.invoke(IPC.sttTranscribe, { wav }),
+  },
 };
 
 contextBridge.exposeInMainWorld('inviterminal', api);

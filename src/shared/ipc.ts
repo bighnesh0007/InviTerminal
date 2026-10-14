@@ -1,7 +1,7 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
 import type { AiStatus } from './ai';
-import type { AudioKind, AudioStatus } from './audio';
+import type { AudioKind, AudioStatus, SttStatus } from './audio';
 import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
 
@@ -74,6 +74,8 @@ export const IPC = {
   audioConsentMeeting: 'audio:consent-meeting',
   /** main → renderer */
   audioStatusChanged: 'audio:status-changed',
+  sttStatus: 'stt:status',
+  sttTranscribe: 'stt:transcribe',
 } as const;
 
 export interface ConcealRequest {
@@ -182,5 +184,10 @@ export interface RendererApi {
     start(kind: AudioKind): Promise<string | null>;
     stop(): Promise<void>;
     consentToMeeting(): Promise<void>;
+  };
+  stt: {
+    status(): Promise<SttStatus>;
+    /** Transcribe 16 kHz mono WAV bytes locally. */
+    transcribe(wav: Uint8Array): Promise<{ text: string; ms: number }>;
   };
 }

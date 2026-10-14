@@ -1,6 +1,6 @@
 ---
 type: decision-record
-status: 7a + 7b + 7c (mic gate) built and verified; 7d (local STT) next
+status: 7a–7d built and verified (explain, mic gate, local STT); 7e (interview practice) next
 verified-on: 2026-10-14
 ---
 
@@ -333,6 +333,32 @@ denied**, and the badge reads "● REC — Microphone test"; after stop, audio i
 the badge is gone; a **meeting** start is refused until consent, then allowed. Over D-Bus, the
 tray tooltip reads "InviTerminal — ● recording (Microphone test)" and **recording survives a
 window hide** (the indicator is never silently hidden). Screenshot in `docs/`.
+
+## 7d — Done (2026-10-14): local speech-to-text (whisper.cpp)
+
+The user installed `whisper-cli` and chose to download **base.en** (~142 MB → the app data
+dir). No audio leaves the machine.
+
+Built and verified:
+- **WAV encoder** (`src/shared/wav.ts`): captured mic PCM → 16 kHz mono 16-bit WAV
+  (resample + encode), pure and unit-tested; `isWav` walks chunks (a real WAV may carry a
+  LIST chunk, as the jfk sample does).
+- **`WhisperStt`** (`src/main/audio/WhisperStt.ts`): spawns `whisper-cli` with an explicit
+  argv (`-m model -f wav -nt -np -l en`), parses stdout; reports availability + a reason
+  when the model/binary is missing.
+- **STT IPC** (`stt-register.ts`): the renderer sends WAV bytes; main writes a `0600` temp
+  file, transcribes, and **deletes it**. Size/format validated (`isWav`, 20 MB cap).
+- **Mic panel**: Record & transcribe → Stop; the transcript appears in the panel, audio is
+  deleted. **Settings**: a whisper model path field + a readiness line; `INVI_WHISPER_MODEL`
+  / `INVI_WHISPER_BIN` override for a run.
+
+Verified: 7 WAV-encoder tests; WhisperStt argv/parse/status tests; **2 real integration
+tests** (real `whisper-cli` + base.en): direct jfk.wav → "ask not what your country…", and
+**encoder→whisper** (decode jfk → `encodeWav` → whisper) → "country", proving the encoder
+output is whisper-readable; 188 tests total; `npm audit --omit=dev` 0. **Live
+(`INVI_AUTOTEST=stt`, real renderer IPC):** the sample transcribed correctly in ~1.2 s with
+**0 temp files leaked** (audio deleted). `isWav` was found too strict (assumed canonical
+44-byte header) and fixed to walk chunks — caught by the autotest on the real sample.
 
 ## 7. Decisions (made 2026-10-14)
 

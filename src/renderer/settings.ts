@@ -50,6 +50,10 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   const apiKey = Object.assign(el('input'), { type: 'password', autocomplete: 'off', placeholder: 'sk-ant-…' });
   apiKey.spellcheck = false;
   const aiKeyStatus = el('span', { className: 'field-note' });
+  const sttModel = el('input');
+  sttModel.spellcheck = false;
+  sttModel.placeholder = 'default: <data dir>/models/ggml-base.en.bin';
+  const sttStatus = el('span', { className: 'field-note' });
 
   const field = (label: string, input: HTMLElement, note?: HTMLElement) => el('label', { className: 'lib-field' }, el('span', { text: label }), input, ...(note ? [note] : []));
 
@@ -107,6 +111,10 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     aiModel.value = s.ai.model;
     renderAiStatus(await api.ai.status());
     for (const a of APP_ACTIONS) chordInputs[a].value = canonicalChord(s.shortcuts[a]) ?? s.shortcuts[a];
+    sttModel.value = s.stt.modelPath ?? '';
+    void api.stt.status().then((st) => {
+      sttStatus.textContent = st.available ? `Speech-to-text ready — ${st.binary}, ${st.model}` : `Not ready — ${st.reason}`;
+    });
     for (const [input, path] of [[mongoUri, 'library.mongoUri'], [allowRemote, 'library.allowRemote'], [globalShortcut, 'globalShortcut']] as const) {
       input.disabled = view.overriddenByEnv.includes(path);
       input.title = input.disabled ? 'Set by an INVI_* environment variable for this run' : '';
@@ -157,6 +165,8 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     const gs = globalShortcut.value.trim() || null;
     if (!view.overriddenByEnv.includes('globalShortcut') && gs !== s.globalShortcut) patch.globalShortcut = gs;
     if (aiModel.value !== s.ai.model) patch.ai = { model: aiModel.value as (typeof AI_MODELS)[number] };
+    const sm = sttModel.value.trim() || null;
+    if (sm !== s.stt.modelPath) patch.stt = { modelPath: sm };
     view = await api.settings.update(patch);
     // Leave any shortcut field, so the next key press acts instead of being recorded.
     if (document.activeElement instanceof HTMLElement && panel.contains(document.activeElement)) document.activeElement.blur();
@@ -204,6 +214,9 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
       }, say),
     ),
     el('span', { className: 'field-note', text: 'The key is stored encrypted in your OS keychain, never in settings.json, and is sent only to Anthropic when you use the AI features.' }),
+    el('h3', { text: 'Speech-to-text (local whisper.cpp)' }),
+    field('Whisper model path', sttModel, sttStatus),
+    el('span', { className: 'field-note', text: 'Transcription runs on your machine with whisper-cli; audio is never uploaded. Download a ggml model (e.g. ggml-base.en.bin) and point this at it.' }),
     el('div', { className: 'lib-actions' }, button('Save', save, say), button('Revert', () => load(), say)),
     message,
   );

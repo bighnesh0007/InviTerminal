@@ -1,7 +1,8 @@
 import { app, type BrowserWindow, clipboard } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PALETTE, randomSequence, type CanarySequence } from '../shared/canary';
 import { findCanary } from '../shared/detect-canary';
@@ -746,6 +747,33 @@ export async function micGateAutotest(win: BrowserWindow, audio: { micAllowed: b
     const meetingWithConsent = await js<string | null>(`window.inviterminal.audio.start('meeting')`);
     await js(`window.inviterminal.audio.stop()`);
     log('meeting-consent', { withoutConsent: meetingNoConsent, withConsent: meetingWithConsent });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}
+
+/** Phase 7d: local STT through the renderer IPC. Uses a known sample so the transcript is deterministic. */
+export async function sttAutotest(win: BrowserWindow): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  try {
+    await until('renderer', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
+    const st = await js<{ available: boolean; model: string; reason: string | null }>(`window.inviterminal.stt.status()`);
+    log('stt-status', st);
+
+    const samplePath = process.env.INVI_STT_SAMPLE;
+    if (!samplePath) {
+      log('error', { message: 'INVI_STT_SAMPLE not set' });
+      win.close();
+      return;
+    }
+    const b64 = (await readFile(samplePath)).toString('base64');
+    const beforeDirs = (await readdir(tmpdir())).filter((d) => d.startsWith('inviterminal-stt-')).length;
+    const r = await js<{ text: string; ms: number }>(
+      `(async () => { const bin = atob(${JSON.stringify(b64)}); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return window.inviterminal.stt.transcribe(u8); })()`,
+    );
+    const afterDirs = (await readdir(tmpdir())).filter((d) => d.startsWith('inviterminal-stt-')).length;
+    log('transcribe', { text: r.text.slice(0, 120), containsExpected: /ask not what your country/i.test(r.text), ms: r.ms, tempDirsLeaked: afterDirs - beforeDirs });
   } catch (e) {
     log('error', { message: (e as Error).message });
   }

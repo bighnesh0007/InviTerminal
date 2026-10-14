@@ -1,0 +1,42 @@
+# Linux packaging. Windows (NSIS, per-user) is added with the Windows phase, where it can be tested.
+appId: io.inviterminal.InviTerminal
+productName: InviTerminal
+executableName: inviterminal
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - assets/**
+  - package.json
+  - "!dist/**/*.map"
+  # node-pty ships sources and other platforms' binaries; Linux needs only build/Release/pty.node.
+  - "!node_modules/node-pty/{deps,src,scripts,third_party,prebuilds}/**"
+  - "!node_modules/node-pty/binding.gyp"
+# node-pty is a native addon: it must sit outside the asar archive to be loaded.
+asarUnpack:
+  - node_modules/node-pty/**
+# node-pty is N-API (one binary for Node and Electron, verified in Phase 2); rebuilding would only add a compile step.
+npmRebuild: false
+# No auto-updater: do not generate update metadata.
+publish: null
+linux:
+  target:
+    - AppImage
+    - dir
+  category: System
+  icon: build/icons
+  synopsis: Terminal that asks the compositor to keep it out of screen capture, and checks
+  description: >-
+    A developer terminal with a snippet library. On KDE Plasma (Wayland) it asks KWin to
+    exclude its window from screen capture and verifies the result with a self-test. It is
+    not invisible: cameras, remote desktop and compromised machines are out of scope.
+  desktop:
+    entry:
+      Name: InviTerminal
+      Comment: Terminal kept out of screen capture where the compositor supports it
+      Categories: System;TerminalEmulator;
+      StartupWMClass: inviterminal
+      Keywords: terminal;shell;snippets;
+appImage:
+  artifactName: InviTerminal-${version}-${arch}.AppImage

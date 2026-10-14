@@ -1,4 +1,5 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { BrowserWindow, shell } from 'electron';
+import { isProductionBuild } from './build-mode';
 import path from 'node:path';
 
 export type WindowRole = 'main' | 'control';
@@ -23,7 +24,7 @@ export function createWindow(role: WindowRole, opts: { title: string; width: num
       nodeIntegration: false,
       webSecurity: true,
       spellcheck: false,
-      devTools: !__dirname.includes('app.asar'),
+      devTools: !isProductionBuild(),
     },
   });
 
@@ -36,7 +37,7 @@ export function createWindow(role: WindowRole, opts: { title: string; width: num
     return { action: 'deny' };
   });
 
-  if (!app.isPackaged) {
+  if (!isProductionBuild()) {
     // Surfaces renderer errors (CSP violations especially) in the dev console.
     win.webContents.on('console-message', (details) => {
       if (details.level === 'warning' || details.level === 'error') console.log(`[renderer:${role}:${details.level}] ${details.message}`);

@@ -23,6 +23,7 @@ import { detectShellProfiles } from './terminal/shells';
 import { registerVisibility } from './visibility/register';
 import { LibraryService } from './library/LibraryService';
 import { registerLibraryIpc } from './library/register';
+import { isProductionBuild } from './build-mode';
 import { createWindow } from './window';
 
 const ScreencastReportSchema = z
@@ -41,6 +42,10 @@ if (process.getuid?.() === 0) {
   console.error('InviTerminal refuses to run as root.');
   app.exit(1);
 }
+
+// Pinned so the data directory (~/.config/inviterminal), the single-instance lock and the
+// Wayland app id stay the same however the app is launched or packaged.
+app.setName('inviterminal');
 
 // Must precede the single-instance lock and settings, which both live in the data directory.
 if (config.userDataDir) app.setPath('userData', config.userDataDir);
@@ -139,7 +144,7 @@ function makeManager(profiles: ReturnType<typeof detectShellProfiles>, tap: Retu
 app.whenReady().then(async () => {
   hardenSession();
   // Autotests type into a real shell and take screenshots: development builds only.
-  const autotest = app.isPackaged ? 'off' : config.autotest;
+  const autotest = isProductionBuild() ? 'off' : config.autotest;
 
   const env = classifyEnvironment(process.platform, sessionEnv);
   const provider = env.kind === 'kwin-wayland' ? createKwinProvider() : createUnsupportedProvider(env.reason);

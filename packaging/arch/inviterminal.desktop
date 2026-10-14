@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=InviTerminal
+Comment=Terminal kept out of screen capture where the compositor supports it
+Exec=inviterminal
+Icon=inviterminal
+Terminal=false
+Categories=System;TerminalEmulator;
+Keywords=terminal;shell;snippets;
+StartupWMClass=inviterminal
+Actions=toggle;
+
+# KDE can bind a global key to this action directly (System Settings → Shortcuts → InviTerminal).
+[Desktop Action toggle]
+Name=Show / Hide
+Exec=inviterminal --toggle

@@ -1,0 +1,60 @@
+# Maintainer: bighnesh0007
+#
+# Local package built from this repository's working tree (tracked + untracked, minus
+# .gitignore'd files) — not an AUR-ready PKGBUILD. Build without installing:
+#   cd packaging/arch && makepkg -f
+# Install (needs root):  sudo pacman -U inviterminal-*.pkg.tar.zst
+
+pkgname=inviterminal
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Developer terminal that asks the compositor to keep it out of screen capture, and checks'
+arch=('x86_64')                      # ships node-pty's native module
+license=('LicenseRef-UNLICENSED')    # no licence chosen yet (package.json: UNLICENSED)
+depends=('electron44' 'glib2' 'glibc' 'gcc-libs')
+optdepends=(
+  'kwin: capture exclusion (KDE Plasma 6.6+ on Wayland)'
+  'mongodb: snippet library on a local server (AUR mongodb-bin / mongodb80-bin)'
+  'spectacle: automatic screenshot self-test'
+)
+makedepends=('nodejs' 'npm' 'git' 'python' 'gcc' 'make')
+# 'debug' would split out a -debug package for one small .node file.
+options=('!debug')
+source=('inviterminal.sh' 'inviterminal.desktop')
+sha256sums=('SKIP' 'SKIP')
+
+_repo="$startdir/../.."
+
+prepare() {
+  rm -rf "$srcdir/app"
+  mkdir -p "$srcdir/app"
+  # Copy the working tree as git sees it (node_modules, release/, dist/ are ignored).
+  git -C "$_repo" ls-files -z --cached --others --exclude-standard \
+    | (cd "$_repo" && xargs -0 cp --parents -t "$srcdir/app")
+}
+
+build() {
+  cd "$srcdir/app"
+  npm ci --no-audit --no-fund
+  npm run build
+  # electron-builder assembles app.asar (+ node-pty unpacked) exactly as in the tested AppImage;
+  # its bundled Electron binary is not shipped — the system electron44 runs the app.
+  npx electron-builder --linux dir --publish never
+}
+
+check() {
+  cd "$srcdir/app"
+  npm run check
+}
+
+package() {
+  cd "$srcdir/app"
+  install -d "$pkgdir/usr/lib/$pkgname"
+  cp -r release/linux-unpacked/resources/app.asar release/linux-unpacked/resources/app.asar.unpacked "$pkgdir/usr/lib/$pkgname/"
+  install -Dm755 "$srcdir/inviterminal.sh" "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 "$srcdir/inviterminal.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+  for s in 16 32 48 64 128 256 512; do
+    install -Dm644 "build/icons/${s}x${s}.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/$pkgname.png"
+  done
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}

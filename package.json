@@ -3,28 +3,35 @@
   "version": "0.1.0",
   "private": true,
   "description": "Developer terminal that requests exclusion from screen capture and verifies the result",
+  "author": {
+    "name": "bighnesh0007"
+  },
+  "license": "UNLICENSED",
+  "desktopName": "inviterminal.desktop",
   "main": "dist/main/index.js",
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "start": "npm run build && electron .",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "dist:linux": "npm run build && electron-builder --linux AppImage dir",
+    "dist:dir": "npm run build && electron-builder --linux dir"
   },
-  "license": "UNLICENSED",
+  "dependencies": {
+    "mongoose": "^9.11.2",
+    "node-pty": "^1.1.0"
+  },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^44.7.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "mongodb-memory-server-core": "^11.3.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.4"
-  },
-  "dependencies": {
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
-    "mongoose": "^9.11.2",
-    "node-pty": "^1.1.0",
+    "vitest": "^5.0.4",
     "zod": "^4.6.7"
   }
 }

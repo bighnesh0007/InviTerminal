@@ -10,7 +10,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc='Developer terminal that asks the compositor to keep it out of screen capture, and checks'
 arch=('x86_64')                      # ships node-pty's native module
-license=('LicenseRef-UNLICENSED')    # no licence chosen yet (package.json: UNLICENSED)
+license=('MIT')
 depends=('electron44' 'glib2' 'glibc' 'gcc-libs')
 optdepends=(
   'kwin: capture exclusion (KDE Plasma 6.6+ on Wayland)'
@@ -57,4 +57,6 @@ package() {
     install -Dm644 "build/icons/${s}x${s}.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/$pkgname.png"
   done
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  # MIT requires the licence text to ship with the package.
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

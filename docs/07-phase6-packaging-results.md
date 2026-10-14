@@ -26,7 +26,8 @@ verified-on: 2026-10-14
 - `electron44`, not the `electron` meta-package, so an Arch move to Electron 45 can't
   silently change the runtime.
 - Optional: `kwin`, `mongodb`, `spectacle`.
-- `license=('LicenseRef-UNLICENSED')`: **no licence has been chosen**.
+- `license=('MIT')`; the package installs `/usr/share/licenses/inviterminal/LICENSE`
+  (chosen 2026-10-14).
 
 ## Changes made for packaging
 
@@ -107,5 +108,4 @@ is byte-for-byte the one tested in development.
   - (b) installing the Arch package (`sudo pacman -U …`, which also pulls `electron44`).
 
   Both need your approval, and you at the screen for KDE's dialog.
-- **Choose a licence** (`package.json` and the PKGBUILD say UNLICENSED).
 - **Windows packaging** (NSIS, per-user) with the Windows phase.

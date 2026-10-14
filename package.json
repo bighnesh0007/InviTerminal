@@ -6,7 +6,7 @@
   "author": {
     "name": "bighnesh0007"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "desktopName": "inviterminal.desktop",
   "main": "dist/main/index.js",
   "scripts": {

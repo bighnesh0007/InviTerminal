@@ -72,7 +72,7 @@ them for a single run, mostly for development:
 |---|---|---|
 | `INVI_MONGODB_URI` | Library → MongoDB URI | Must name its own database; non-local hosts are refused… |
 | `INVI_MONGODB_ALLOW_REMOTE` | …unless this is `1` | Snippets would leave this machine |
-| `INVI_GLOBAL_SHORTCUT` | Global shortcut | Portal shortcut, e.g. `Control+Alt+T`. Needs an installed .desktop file on KDE (Phase 6) |
+| `INVI_GLOBAL_SHORTCUT` | Global shortcut | Portal shortcut, e.g. `Control+Alt+T`. Works once `inviterminal.desktop` is installed (Arch package, or `scripts/user-desktop-entry.sh install`); KDE asks you to confirm the first time |
 | `INVI_USER_DATA_DIR` | — | Use another data directory (settings, single-instance lock); the autotests use a temp one |
 
 ## Install

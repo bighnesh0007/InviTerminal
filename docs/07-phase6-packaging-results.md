@@ -1,6 +1,6 @@
 ---
 type: findings
-status: Phase 6 — AppImage and Arch package built and verified without installing; portal-shortcut test awaits a desktop entry
+status: Phase 6 — AppImage and Arch package built and verified without installing; portal global shortcut verified with a per-user desktop entry
 verified-on: 2026-10-14
 ---
 
@@ -99,13 +99,32 @@ is byte-for-byte the one tested in development.
   cache was untouched (its creation time was 11:04, unchanged). The new file was
   deleted, and the script no longer rebuilds the cache for non-default data folders.
 
+## Portal global shortcut: **works** with an installed desktop entry
+
+Run 2026-10-14 with your approval:
+- `scripts/user-desktop-entry.sh install` wrote `~/.local/share/applications/inviterminal.desktop`
+  and 7 icons;
+- `kglobalshortcutsrc` was backed up first;
+- then `INVI_GLOBAL_SHORTCUT=Control+Alt+Shift+T INVI_AUTOTEST=portal-shortcut` ran from
+  the dev checkout, with a D-Bus trace.
+
+| Evidence | Result |
+|---|---|
+| `host.portal.Registry.Register` | sent with app id **`inviterminal`**, no error (in Phase 4, with no desktop file, Chromium logged "Failed to register") |
+| Portal flow | `CreateSession` → `BindShortcuts` → 3 `Response`s; KDE's dialog accepted by you |
+| Key presses | 2 × `Activated`: the 1st **hid** the window (10.1 s), the 2nd **showed** it with focus (11.4 s) |
+| `kglobalshortcutsrc` diff | exactly one new section, `[inviterminal]`, holding the `Ctrl+Alt+Shift+T` binding and `_k_friendly_name=InviTerminal`; nothing else changed |
+
+**Left on your system** (both removable):
+- the desktop entry and icons: `scripts/user-desktop-entry.sh uninstall`;
+- the KDE binding: System Settings → Shortcuts → InviTerminal.
+
+**Not yet checked:**
+- whether the binding still works after an app restart, the failure mode other apps
+  report (this needs you to press the key again);
+- that it doesn't double-fire when the CLI `--toggle` binding also exists.
+
 ## Still to do
 
-- **Portal global shortcut test.** It needs an installed `inviterminal.desktop`, through
-  either:
-  - (a) `scripts/user-desktop-entry.sh install` (writes `~/.local/share/applications`,
-    user-level); or
-  - (b) installing the Arch package (`sudo pacman -U …`, which also pulls `electron44`).
-
-  Both need your approval, and you at the screen for KDE's dialog.
+- The two portal checks above.
 - **Windows packaging** (NSIS, per-user) with the Windows phase.

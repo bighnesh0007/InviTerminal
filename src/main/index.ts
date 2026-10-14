@@ -1,10 +1,10 @@
-import { app, type BrowserWindow, desktopCapturer, ipcMain, type IpcMainInvokeEvent, powerMonitor, screen, session } from 'electron';
+import { app, type BrowserWindow, desktopCapturer, globalShortcut, ipcMain, type IpcMainInvokeEvent, powerMonitor, screen, session } from 'electron';
 import * as nodePty from 'node-pty';
 import { accessSync, constants, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { captureAutotest, createTerminalTap, terminalAutotest, uiSnapshotAutotest, visibilityAutotest } from './autotest';
+import { captureAutotest, createTerminalTap, libraryAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -17,6 +17,8 @@ import { PtyManager } from './terminal/PtyManager';
 import { registerTerminalIpc } from './terminal/register';
 import { detectShellProfiles } from './terminal/shells';
 import { registerVisibility } from './visibility/register';
+import { LibraryService } from './library/LibraryService';
+import { registerLibraryIpc } from './library/register';
 import { createWindow } from './window';
 
 const ScreencastReportSchema = z
@@ -37,6 +39,12 @@ if (process.getuid?.() === 0) {
 }
 
 if (!app.requestSingleInstanceLock()) app.exit(0);
+
+// Wayland apps cannot grab keys; Chromium can ask the xdg-desktop-portal instead. Opt-in only:
+// KDE shows a confirmation dialog and persists the binding in ~/.config/kglobalshortcutsrc.
+if (config.globalShortcut && process.platform === 'linux' && sessionEnv.XDG_SESSION_TYPE === 'wayland') {
+  app.commandLine.appendSwitch('enable-features', 'GlobalShortcutsPortal');
+}
 
 let mainWin: BrowserWindow | null = null;
 let runner: SelfTestRunner | null = null;
@@ -99,7 +107,7 @@ function createPtyManager(tap: ReturnType<typeof createTerminalTap> | null): Pty
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   hardenSession();
   // Autotests type into a real shell and take screenshots: development builds only.
   const autotest = app.isPackaged ? 'off' : config.autotest;
@@ -107,7 +115,7 @@ app.whenReady().then(() => {
   const env = classifyEnvironment(process.platform, sessionEnv);
   const provider = env.kind === 'kwin-wayland' ? createKwinProvider() : createUnsupportedProvider(env.reason);
 
-  const tap = autotest === 'terminal' || autotest === 'ui-snapshot' || autotest === 'visibility' ? createTerminalTap() : null;
+  const tap = autotest === 'terminal' || autotest === 'ui-snapshot' || autotest === 'visibility' || autotest === 'library' ? createTerminalTap() : null;
   const manager = createPtyManager(tap);
   if (tap) {
     const spawn = manager.spawn.bind(manager);
@@ -119,6 +127,32 @@ app.whenReady().then(() => {
   }
   registerTerminalIpc(() => mainWin, manager);
 
+  // The library autotest uses a throwaway mongod (system binary, temp dir) — never the shared server.
+  let memServer: { getUri(): string; stop(): Promise<boolean> } | null = null;
+  if (autotest === 'library') {
+    const { MongoMemoryServer } = await import('mongodb-memory-server-core');
+    memServer = await MongoMemoryServer.create({ binary: { systemBinary: '/usr/bin/mongod', version: '8.0.15' } });
+    await pingRealMongo(config.mongoUri);
+  }
+  const library = new LibraryService(memServer ? `${memServer.getUri()}inviterminal_autotest` : config.mongoUri, config.mongoAllowRemote, (s) => {
+    if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.libStatusChanged, s);
+  });
+  registerLibraryIpc(() => mainWin, library);
+  void library.start();
+  app.on('will-quit', () => {
+    void library.close();
+    void memServer?.stop();
+  });
+
+  const inputs = new Map<string, string[]>();
+  if (autotest === 'library') {
+    const input = manager.input.bind(manager);
+    manager.input = (sessionId, data) => {
+      inputs.set(sessionId, [...(inputs.get(sessionId) ?? []), data]);
+      input(sessionId, data);
+    };
+  }
+
   const win = createWindow('main', { title: config.mainTitle, width: 980, height: 680 });
   mainWin = win;
   const controller = new ProtectionController(provider, win, (s) => {
@@ -128,12 +162,25 @@ app.whenReady().then(() => {
   const r = runner;
   const visibility = registerVisibility(win);
 
+  // register() returning true is not proof the key works (with the portal, the user has not even
+  // confirmed yet); firedCount is what the autotest checks.
+  const shortcut: ShortcutStatus = { accelerator: config.globalShortcut ?? null, registerReturned: null, firedCount: 0 };
+  if (config.globalShortcut) {
+    shortcut.registerReturned = globalShortcut.register(config.globalShortcut, () => {
+      shortcut.firedCount++;
+      void visibility.controller.toggle();
+    });
+    app.on('will-quit', () => globalShortcut.unregisterAll());
+  }
+
   // A hidden-then-shown Wayland window is a new KWin window with the flag cleared, so every show re-applies.
   let first = true;
   win.on('show', () => {
     const done = first ? controller.initialise() : controller.protect();
     if (first && autotest === 'screenshot') void done.then(() => captureAutotest(win, controller, r));
     if (first && tap && autotest === 'terminal') void done.then(() => terminalAutotest(win, manager, tap));
+    if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
+    if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {
       const childEnv = buildChildEnv(shellParentEnv(), app.getVersion());
       void done.then(() => visibilityAutotest(win, manager, tap, controller, visibility, r, childEnv));
@@ -184,5 +231,19 @@ app.whenReady().then(() => {
     }),
   );
 });
+
+/** Read-only reachability check of the configured (shared) MongoDB: a ping, no writes. */
+async function pingRealMongo(uri: string): Promise<void> {
+  const { default: mongoose } = await import('mongoose');
+  const t0 = Date.now();
+  try {
+    const conn = await mongoose.createConnection(uri, { serverSelectionTimeoutMS: 2000, autoIndex: false, autoCreate: false }).asPromise();
+    const ok = (await conn.db!.admin().ping()).ok === 1;
+    await conn.close();
+    console.log(`[autotest] ${JSON.stringify({ event: 'real-mongo-ping', ok, ms: Date.now() - t0 })}`);
+  } catch (e) {
+    console.log(`[autotest] ${JSON.stringify({ event: 'real-mongo-ping', ok: false, error: (e as Error).message })}`);
+  }
+}
 
 app.on('window-all-closed', () => app.quit());

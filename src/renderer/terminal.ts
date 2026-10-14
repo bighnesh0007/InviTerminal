@@ -9,6 +9,8 @@ const INPUT_CHUNK = 32_768;
 
 export interface TerminalView {
   focus(): void;
+  /** Types text as a paste: bracketed when the shell enabled bracketed paste, so it is not run. */
+  paste(text: string): void;
   /** Re-measure after the container changes size. */
   fit(): void;
 }
@@ -103,8 +105,8 @@ export function mountTerminal(container: HTMLElement, api: RendererApi, inputAll
       if (sel) void api.clipboard.write(sel);
       return false;
     }
-    // Panic hide is handled at window level; keep xterm from also sending it to the shell.
-    if (e.code === 'KeyH') return false;
+    // Panic hide and the library toggle are handled at window level; keep xterm from also sending them.
+    if (e.code === 'KeyH' || e.code === 'KeyL') return false;
     if (e.code === 'KeyV') {
       // term.paste() applies bracketed-paste markers when the shell asked for them.
       void api.clipboard.read().then((t) => term.paste(t));
@@ -120,5 +122,5 @@ export function mountTerminal(container: HTMLElement, api: RendererApi, inputAll
   }).observe(container);
 
   void start();
-  return { focus: () => term.focus(), fit };
+  return { focus: () => term.focus(), paste: (text) => term.paste(text), fit };
 }

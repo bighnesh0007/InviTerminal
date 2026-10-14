@@ -1,4 +1,4 @@
-import { app, type BrowserWindow } from 'electron';
+import { app, type BrowserWindow, clipboard } from 'electron';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
@@ -10,6 +10,7 @@ import { spectacleFind, type SelfTestRunner } from './capture/selftest/SelfTestR
 import type { PtyManager } from './terminal/PtyManager';
 import type { VisibilityWiring } from './visibility/register';
 import * as kwin from './capture/kwin/dbus';
+import type { LibraryService } from './library/LibraryService';
 
 /**
  * Development aid (INVI_AUTOTEST). Drives the real app against the real
@@ -301,6 +302,170 @@ export async function visibilityAutotest(
     log('terminal-restored-after-reconfirm', { found: findInBitmap(await win.webContents.capturePage(), termSeq), level: controller.get().level });
   } catch (e) {
     log('error', { message: (e as Error).message });
+  }
+  win.close();
+}
+
+export interface ShortcutStatus {
+  accelerator: string | null;
+  registerReturned: boolean | null;
+  firedCount: number;
+}
+
+/**
+ * Needs a person: accept KDE's shortcut dialog, then press the shortcut twice
+ * (hide, then show). Passes only if the key actually fires and toggles.
+ */
+export async function portalShortcutAutotest(win: BrowserWindow, s: ShortcutStatus): Promise<void> {
+  log('registered', { accelerator: s.accelerator, registerReturned: s.registerReturned });
+  if (!s.accelerator) {
+    log('error', { message: 'INVI_GLOBAL_SHORTCUT is not set' });
+    win.close();
+    return;
+  }
+  const t0 = Date.now();
+  try {
+    await until('first key press', () => s.firedCount >= 1 || undefined, 180_000);
+    await sleep(500);
+    log('fired-1', { afterMs: Date.now() - t0, visibleAfter: win.isVisible(), expected: false });
+    await until('second key press', () => s.firedCount >= 2 || undefined, 120_000);
+    await sleep(800);
+    log('fired-2', { afterMs: Date.now() - t0, visibleAfter: win.isVisible(), expected: true, focused: win.isFocused() });
+  } catch (e) {
+    log('error', { message: (e as Error).message, firedCount: s.firedCount });
+  }
+  win.close();
+}
+
+/** Strips CSI/OSC escapes so terminal output can be checked line by line. */
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/\x1b[=>]/g, '');
+}
+
+/** True if `marker` appeared as a whole output line — i.e. a command printed it, not just the typed command line. */
+function printedLine(output: string, marker: string): boolean {
+  return stripAnsi(output)
+    .split(/[\r\n]+/)
+    .some((line) => line.trim() === marker);
+}
+
+/**
+ * Phase 4: the snippet library through the real renderer, against a throwaway
+ * mongod. Records what reaches the PTY to prove inserting never executes.
+ */
+export async function libraryAutotest(
+  win: BrowserWindow,
+  manager: PtyManager,
+  tap: TerminalTap,
+  controller: ProtectionController,
+  library: LibraryService,
+  inputs: Map<string, string[]>,
+  snapshotPath: string | undefined,
+): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  const clickIn = (scope: string, text: string) =>
+    js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
+  const nonce = randomBytes(3).toString('hex');
+  // The test overwrites the clipboard; every format on it is saved and put back afterwards.
+  const savedClipboard = await clipboard.read().catch(() => null);
+  try {
+    const first = await until('renderer to spawn a shell', () => tap.spawned[0], 10_000);
+    await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
+    await until('library ready', () => library.getStatus().state === 'ready' || undefined, 10_000);
+    const id = first.sessionId;
+    const typed = () => (inputs.get(id) ?? []).join('');
+    const out = () => (tap.output.get(id) ?? []).join('');
+
+    const store = library.require();
+    const single = await store.create({ title: `single ${nonce}`, body: `echo invi-single-${nonce}\n`, folder: 'autotest', tags: ['demo'] });
+    const multi = await store.create({ title: `multi ${nonce}`, body: `echo invi-ml1-${nonce}\necho invi-ml2-${nonce}\n`, folder: 'autotest/deep' });
+    await store.create({ title: 'unrelated', body: 'uptime' });
+
+    await clickIn('header', 'Snippets (Ctrl+Shift+L)');
+    await js(`(() => { const s = document.querySelector('.lib-search'); s.value = ${JSON.stringify(nonce)}; s.dispatchEvent(new Event('input')); })()`);
+    await sleep(600);
+    const listed = await js<string[]>(`[...document.querySelectorAll('.lib-item .lib-title')].map((e) => e.textContent)`);
+    log('search', { query: nonce, listed, expected: [`multi ${nonce}`, `single ${nonce}`].sort() });
+
+    // Single-line insert: typed into the shell, but never executed.
+    const before = typed().length;
+    await clickIn(`[data-snippet-id="${single.id}"]`, 'Insert');
+    await sleep(800);
+    const sent = typed().slice(before);
+    log('insert-single', {
+      reachedPty: sent.includes(`echo invi-single-${nonce}`),
+      containsNewline: /[\r\n]/.test(sent),
+      executed: printedLine(out(), `invi-single-${nonce}`),
+      useCount: (await store.get(single.id))?.useCount,
+    });
+    manager.input(id, '\r');
+    // Positive control for the check above: the same detector must see it once Enter is pressed.
+    await until('manual Enter runs it', () => printedLine(out(), `invi-single-${nonce}`) || undefined, 5000);
+    log('enter-runs-it', { executed: true });
+
+    // Multi-line: confirmation first; Cancel writes nothing; confirming pastes (bracketed) without running.
+    const beforeMulti = typed().length;
+    await clickIn(`[data-snippet-id="${multi.id}"]`, 'Insert');
+    await sleep(300);
+    const confirmShown = await js<boolean>(`!document.querySelector('.lib-confirm').hidden`);
+    const writtenBeforeConfirm = typed().length - beforeMulti;
+    await clickIn('.lib-confirm', 'Cancel');
+    await sleep(300);
+    const writtenAfterCancel = typed().length - beforeMulti;
+    await clickIn(`[data-snippet-id="${multi.id}"]`, 'Insert');
+    await sleep(300);
+    await clickIn('.lib-confirm', 'Insert');
+    await sleep(800);
+    const ml = typed().slice(beforeMulti);
+    log('insert-multi', {
+      confirmShown,
+      writtenBeforeConfirm,
+      writtenAfterCancel,
+      bracketed: ml.startsWith('\x1b[200~') && ml.endsWith('\x1b[201~'),
+      endsWithNewline: /[\r\n]$/.test(ml.replace(/\x1b\[201~$/, '')),
+      executed: printedLine(out(), `invi-ml1-${nonce}`) || printedLine(out(), `invi-ml2-${nonce}`),
+    });
+    // Positive control: Enter runs the pasted lines, and the detector sees both.
+    manager.input(id, '\r');
+    await until('Enter runs the multi-line paste', () => (printedLine(out(), `invi-ml1-${nonce}`) && printedLine(out(), `invi-ml2-${nonce}`)) || undefined, 5000);
+    log('enter-runs-multi', { executed: true });
+
+    // Copy puts the body on the clipboard (restored at the end).
+    await clickIn(`[data-snippet-id="${single.id}"]`, 'Copy');
+    await sleep(300);
+    log('copy', { clipboardMatches: (await clipboard.readText()) === single.body });
+
+    // Edit through the form.
+    await clickIn(`[data-snippet-id="${single.id}"]`, 'Edit');
+    await js(`(() => { const t = document.querySelector('.lib-editor input'); t.value = 'renamed ${nonce}'; })()`);
+    await clickIn('.lib-editor', 'Save');
+    await sleep(500);
+    log('edit', { stored: (await store.get(single.id))?.title, expected: `renamed ${nonce}` });
+
+    // Delete → Undo.
+    await clickIn(`[data-snippet-id="${multi.id}"]`, 'Delete');
+    await sleep(400);
+    const trashed = (await store.get(multi.id))?.deletedAt !== null;
+    await clickIn('.lib-message', 'Undo');
+    await sleep(400);
+    log('delete-undo', { trashed, restored: (await store.get(multi.id))?.deletedAt === null });
+
+    if (snapshotPath) {
+      await writeFile(snapshotPath, (await win.webContents.capturePage()).toPNG());
+      log('snapshot', { path: snapshotPath });
+    }
+
+    // The library is behind the protection gate too.
+    await controller.unprotect();
+    await sleep(400);
+    const hidden = await js<string>(`getComputedStyle(document.querySelector('.library')).visibility`);
+    const gateShown = await js<boolean>(`!document.querySelector('.gate').hidden`);
+    log('gated', { libraryVisibility: hidden, gateShown });
+    await controller.protect();
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  } finally {
+    if (savedClipboard) await clipboard.write(savedClipboard).catch(() => undefined);
   }
   win.close();
 }

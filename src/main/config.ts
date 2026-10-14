@@ -1,12 +1,23 @@
 import { z } from 'zod';
+import { isValidGlobalAccelerator } from './visibility/accelerator';
 
 /** The only place environment variables are read. */
 const EnvSchema = z.object({
   INVI_RECHECK_INTERVAL_MS: z.coerce.number().int().min(1000).max(600_000).default(10_000),
   /** Development aid: drive the real app (capture self-test, or a real shell session), log JSON, and quit. */
-  INVI_AUTOTEST: z.enum(['off', 'screenshot', 'terminal', 'ui-snapshot', 'visibility']).default('off'),
+  INVI_AUTOTEST: z.enum(['off', 'screenshot', 'terminal', 'ui-snapshot', 'visibility', 'portal-shortcut', 'library']).default('off'),
   /** Where ui-snapshot writes its PNG. Absolute path, .png only. */
   INVI_SNAPSHOT_PATH: z.string().regex(/^\/.+\.png$/).optional(),
+  /**
+   * Opt-in global toggle shortcut, e.g. "Control+Alt+T". On Wayland it goes through the
+   * xdg-desktop-portal GlobalShortcuts interface: KDE asks the user to confirm and stores
+   * the binding in ~/.config/kglobalshortcutsrc. Unset = no global shortcut (use the CLI).
+   */
+  INVI_GLOBAL_SHORTCUT: z.string().refine(isValidGlobalAccelerator, 'not a valid global accelerator (needs a modifier)').optional(),
+  /** Snippet library. Its own database on the local mongod by default; checked by checkMongoUri before use. */
+  INVI_MONGODB_URI: z.string().default('mongodb://127.0.0.1:27017/inviterminal'),
+  /** Snippets can contain secrets: a non-local MongoDB is refused unless this is "1". */
+  INVI_MONGODB_ALLOW_REMOTE: z.enum(['0', '1']).default('0'),
 });
 
 const env = EnvSchema.parse(process.env);
@@ -36,6 +47,9 @@ export const config = {
   recheckIntervalMs: env.INVI_RECHECK_INTERVAL_MS,
   autotest: env.INVI_AUTOTEST,
   snapshotPath: env.INVI_SNAPSHOT_PATH,
+  globalShortcut: env.INVI_GLOBAL_SHORTCUT,
+  mongoUri: env.INVI_MONGODB_URI,
+  mongoAllowRemote: env.INVI_MONGODB_ALLOW_REMOTE === '1',
   canaryPaintTimeoutMs: 3000,
   /** Extra time for a painted frame to reach the compositor. */
   compositorSettleMs: 250,

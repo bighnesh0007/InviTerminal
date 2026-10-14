@@ -2,6 +2,8 @@ import { cssColor, type CanarySequence } from '../shared/canary';
 import { findCanary } from '../shared/detect-canary';
 import type { RendererApi, ScreencastReport } from '../shared/ipc';
 import { contentMayShow, type ProtectionLevel, type ProtectionState, type SelfTestRecord } from '../shared/protection';
+import { button as makeButton, el } from './dom';
+import { mountLibrary } from './library';
 import { mountTerminal } from './terminal';
 
 declare global {
@@ -13,30 +15,8 @@ declare global {
 const api = window.inviterminal;
 const role = new URLSearchParams(location.search).get('role') === 'control' ? 'control' : 'main';
 
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: { className?: string; text?: string } = {}, ...children: Node[]): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  if (props.className) node.className = props.className;
-  if (props.text !== undefined) node.textContent = props.text;
-  node.append(...children);
-  return node;
-}
-
 const alertLine = el('p', { className: 'alert' });
-
-function button(text: string, onClick: () => Promise<unknown> | void): HTMLButtonElement {
-  const b = el('button', { text });
-  b.addEventListener('click', async () => {
-    b.disabled = true;
-    try {
-      await onClick();
-    } catch (e) {
-      alertLine.textContent = `Error: ${(e as Error).message}`;
-    } finally {
-      b.disabled = false;
-    }
-  });
-  return b;
-}
+const button = (text: string, onClick: () => Promise<unknown> | void) => makeButton(text, onClick, (m) => (alertLine.textContent = `Error: ${m}`));
 
 // ---- canary (both roles) ----------------------------------------------------
 
@@ -115,6 +95,19 @@ function renderMain(): void {
     gate.classList.add('pulse');
   });
 
+  const library = mountLibrary(api, {
+    paste: (text) => {
+      view.paste(text);
+      view.focus();
+    },
+    onOpenChange: (open) => {
+      termWrap.classList.toggle('lib-open', open);
+      requestAnimationFrame(() => view.fit());
+    },
+    inputAllowed,
+  });
+  termWrap.append(library.element);
+
   gate.append(
     button('Show anyway', () => {
       override = true;
@@ -133,6 +126,9 @@ function renderMain(): void {
     const wasHidden = !gate.hidden;
     gate.hidden = show;
     termHost.classList.toggle('concealed', !show);
+    library.element.classList.toggle('concealed', !show);
+    // Nothing behind the cover may keep keyboard focus (e.g. the snippet search box).
+    if (!show && document.activeElement instanceof HTMLElement && termWrap.contains(document.activeElement)) document.activeElement.blur();
     if (show && wasHidden) view.focus();
     // Problems should not hide behind a collapsed drawer.
     if ((s.level === 'unsupported' || s.level === 'selftest-failed' || s.level === 'request-failed') && drawer.hidden) drawerToggle.click();
@@ -207,7 +203,8 @@ function renderMain(): void {
   );
 
   const hideButton = button('Hide (Ctrl+Shift+H)', () => api.visibility.panicHide());
-  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), hideButton, drawerToggle), drawer, termWrap);
+  const libraryButton = button('Snippets (Ctrl+Shift+L)', () => library.toggle());
+  document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, el('span', { className: 'spacer' }), libraryButton, hideButton, drawerToggle), drawer, termWrap);
 
   // The drawer changes the terminal's height.
   new ResizeObserver(() => view.fit()).observe(drawer);
@@ -228,6 +225,10 @@ function renderMain(): void {
         e.preventDefault();
         e.stopPropagation();
         api.visibility.panicHide();
+      } else if (e.ctrlKey && e.shiftKey && e.code === 'KeyL') {
+        e.preventDefault();
+        e.stopPropagation();
+        library.toggle();
       }
     },
     { capture: true },

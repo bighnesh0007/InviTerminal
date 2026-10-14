@@ -1,5 +1,6 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
+import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
 
 export const IPC = {
   getState: 'protection:get-state',
@@ -32,6 +33,18 @@ export const IPC = {
   concealed: 'visibility:concealed',
   /** renderer → main: hide now (Ctrl+Shift+H or the Hide button). */
   panicHide: 'visibility:panic-hide',
+  libStatus: 'library:status',
+  /** main → renderer */
+  libStatusChanged: 'library:status-changed',
+  libRetry: 'library:retry',
+  libSearch: 'library:search',
+  libCreate: 'library:create',
+  libUpdate: 'library:update',
+  libTrash: 'library:trash',
+  libRestore: 'library:restore',
+  libUsed: 'library:used',
+  libFolders: 'library:folders',
+  libTags: 'library:tags',
 } as const;
 
 export interface ConcealRequest {
@@ -98,5 +111,18 @@ export interface RendererApi {
     onConceal(cb: (req: ConcealRequest) => void): void;
     concealed(token: number): void;
     panicHide(): void;
+  };
+  library: {
+    status(): Promise<LibraryStatus>;
+    onStatus(cb: (s: LibraryStatus) => void): void;
+    retry(): Promise<LibraryStatus>;
+    search(q: SearchQuery): Promise<Snippet[]>;
+    create(input: SnippetInput): Promise<Snippet>;
+    update(id: string, patch: Partial<SnippetInput>): Promise<Snippet>;
+    trash(id: string): Promise<Snippet>;
+    restore(id: string): Promise<Snippet>;
+    used(id: string): Promise<void>;
+    folders(): Promise<string[]>;
+    tags(): Promise<string[]>;
   };
 }

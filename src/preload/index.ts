@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { CanarySequence } from '../shared/canary';
 import { type ConcealRequest, IPC, type RendererApi, type ScreencastReport } from '../shared/ipc';
 import type { ProtectionState } from '../shared/protection';
+import type { LibraryStatus } from '../shared/snippet';
 
 // Each function maps to exactly one channel; the renderer never sees ipcRenderer itself.
 const api: RendererApi = {
@@ -44,6 +45,21 @@ const api: RendererApi = {
     },
     concealed: (token) => ipcRenderer.send(IPC.concealed, token),
     panicHide: () => ipcRenderer.send(IPC.panicHide),
+  },
+  library: {
+    status: () => ipcRenderer.invoke(IPC.libStatus),
+    onStatus: (cb) => {
+      ipcRenderer.on(IPC.libStatusChanged, (_e, s: LibraryStatus) => cb(s));
+    },
+    retry: () => ipcRenderer.invoke(IPC.libRetry),
+    search: (q) => ipcRenderer.invoke(IPC.libSearch, q),
+    create: (input) => ipcRenderer.invoke(IPC.libCreate, input),
+    update: (id, patch) => ipcRenderer.invoke(IPC.libUpdate, { id, patch }),
+    trash: (id) => ipcRenderer.invoke(IPC.libTrash, { id }),
+    restore: (id) => ipcRenderer.invoke(IPC.libRestore, { id }),
+    used: (id) => ipcRenderer.invoke(IPC.libUsed, { id }),
+    folders: () => ipcRenderer.invoke(IPC.libFolders),
+    tags: () => ipcRenderer.invoke(IPC.libTags),
   },
 };
 

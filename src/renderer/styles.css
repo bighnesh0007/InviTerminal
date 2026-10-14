@@ -55,3 +55,32 @@ ul { margin: 0; padding-left: 18px; }
 .canary .stripe { flex: 1 1 0; }
 body.control { padding: 12px; }
 .control-label { color: var(--warn); margin: 0 0 8px; }
+
+/* ---- snippet library ---------------------------------------------------------------- */
+.library { position: absolute; top: 0; right: 0; bottom: 0; width: 400px; z-index: 2; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: var(--panel); border-left: 1px solid #23262e; overflow-y: auto; }
+.library[hidden] { display: none; }
+.library.concealed { visibility: hidden; }
+.term-wrap.lib-open .term-host { right: 410px; }
+.gate { z-index: 5; }
+.lib-head { display: flex; align-items: center; justify-content: space-between; }
+.lib-status { margin: 0; font-size: 12px; color: var(--muted); }
+.lib-status[data-state='unavailable'] { color: #ff8a80; }
+.lib-filters { display: flex; gap: 6px; align-items: center; }
+.lib-search { flex: 1; min-width: 0; }
+input, select, textarea { background: var(--bg); color: var(--text); border: 1px solid #333844; border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 13px; }
+textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; }
+.lib-trash { display: flex; gap: 4px; align-items: center; font-size: 12px; color: var(--muted); }
+.lib-message { min-height: 1.2em; margin: 0; font-size: 12px; color: var(--muted); }
+.lib-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.lib-item { background: var(--bg); border: 1px solid #23262e; border-radius: 6px; padding: 8px; }
+.lib-title { font-weight: 600; }
+.lib-meta { font-size: 11px; color: var(--muted); min-height: 1em; }
+.lib-preview { display: block; font-size: 12px; color: #b9c0cc; white-space: pre; overflow: hidden; text-overflow: ellipsis; margin: 4px 0; }
+.lib-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.lib-empty { color: var(--muted); font-size: 13px; }
+.lib-editor { display: flex; flex-direction: column; gap: 6px; }
+.lib-editor[hidden], .lib-list[hidden], .lib-confirm[hidden] { display: none; }
+.lib-field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.lib-confirm { border: 1px solid var(--warn); border-radius: 6px; padding: 8px; background: #241c0e; }
+.lib-confirm p { margin: 0 0 6px; font-size: 13px; }
+.lib-confirm pre { max-height: 200px; overflow: auto; font-size: 12px; }

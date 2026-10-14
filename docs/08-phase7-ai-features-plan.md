@@ -1,6 +1,6 @@
 ---
 type: decision-record
-status: Phase 7 complete; provider switched Anthropic → Groq (user directive). Real Groq round-trips need the user's free key.
+status: Phase 7 complete (incl. 7f interviewer TTS, local/espeak-ng); provider switched Anthropic → Groq (user directive). Real Groq round-trips need the user's free key; real TTS audio needs espeak-ng installed.
 verified-on: 2026-10-14
 ---
 
@@ -248,7 +248,7 @@ Mongoose (Phase 5) so the `--toggle` hotkey process doesn't parse it.
 | **7c** | Mic permission gate + recording indicator (no STT yet) | Mic is denied until a session starts; the indicator shows and survives panic-hide; off by default |
 | **7d** | Local STT (whisper.cpp) wired to a push-to-talk capture | A spoken sentence transcribes locally; the wav is deleted; nothing leaves the machine |
 | **7e** | Interview practice mode (B1): interviewer Q → your spoken answer → feedback | A full practice round, text interviewer; measured latency |
-| **7f** (optional) | TTS interviewer voice; B2 consented notes (no diarization) | Consent reminder + indicator verified; transcript + summary produced |
+| **7f** | TTS interviewer voice (**done**); B2 consented notes → deferred to Phase 8d | Interviewer reads questions aloud (local, off by default), verified headlessly |
 | **later** | Diarization investigation for B2 | Measured accuracy before any claim |
 
 **MVP = 7a–7b** (the screenshot/explain feature you asked for first). B is 7c–7e.
@@ -386,6 +386,38 @@ Anthropic (no key in this environment) and the record→transcribe→submit path
 A harness bug was caught and fixed: the autotest's sync `until` was given async predicates
 (a Promise is always truthy), so it returned before the stream arrived; replaced with an
 awaiting `waitFor`.
+
+## 7f — Done (2026-10-14): interviewer text-to-speech (local)
+
+The interviewer can read its questions **aloud**, off by default, generated locally (nothing
+leaves the machine), mirroring the whisper.cpp shape from 7d.
+
+- **`TtsSpeaker`** (`src/main/audio/TtsSpeaker.ts`): an injectable `RunTts` runner (tests/
+  autotests use a fake — no real audio), a `status()` that reports `available` + a `reason`
+  telling you what to install, and `speak()`/`stop()` with **one utterance at a time** (a new
+  `speak` cancels the previous). Text is passed as a trailing argv argument (no shell, so
+  punctuation is safe) and clamped to 8000 chars. Default engine **espeak-ng** (user's pick);
+  binary + voice are configurable in Settings and via `INVI_TTS_BIN` / `INVI_TTS_VOICE`.
+- **IPC** `tts:status` / `tts:speak` / `tts:stop` (`tts-register.ts`), window-guarded, main-only.
+- **Practice panel**: a **"🔊 Read questions aloud"** checkbox (hidden when no engine is
+  available, **off by default**). When on, a *finished* interviewer turn is spoken; sending an
+  answer or ending stops speech so the interviewer never talks over the candidate.
+- **Settings**: a "Text-to-speech (local)" section (binary + voice + a readiness line). Also
+  fixed a stale `sk-ant-…` key placeholder → `gsk_…` (Groq).
+
+Verified: 12 `TtsSpeaker` unit tests (argv build with/without voice, text clamp, status
+reason when an absolute binary is missing, empty-text no-op, refuses when unavailable,
+one-at-a-time cancel, `stop`); the one-at-a-time guard was **deliberately broken once** and the
+test caught it (`stopped` 0 ≠ 1). 209 tests total; `npm run check` green. **Live
+(`INVI_AUTOTEST=tts`, fake engine, no audio):** status available (espeak-ng); a direct
+`tts.speak` round-trip **reached the engine**; the toggle is present and **off by default**;
+**positive control** — with it on, the finished "Question 1…" was handed to the engine;
+**negative control** — with it off, the next turn produced **0** speak calls (so the check
+can't pass trivially). **Not verified (yours):** real audio — install espeak-ng
+(`sudo pacman -S espeak-ng`) and you'll hear the questions.
+
+No TTS engine is installed on this machine, so `status()` degrades to text-only with an
+install hint, exactly like whisper did.
 
 ## Provider switch: Anthropic → Groq (2026-10-14)
 

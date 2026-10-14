@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { aiExplainAutotest, aiKeyAutotest, captureAutotest, companionAutotest, micGateAutotest, practiceAutotest, sttAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { aiExplainAutotest, aiKeyAutotest, captureAutotest, companionAutotest, micGateAutotest, practiceAutotest, sttAutotest, ttsAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -26,6 +26,8 @@ import { AudioController } from './audio/AudioController';
 import { registerAudioIpc } from './audio/register';
 import { WhisperStt } from './audio/WhisperStt';
 import { registerSttIpc } from './audio/stt-register';
+import { type RunTts, TtsSpeaker } from './audio/TtsSpeaker';
+import { registerTtsIpc } from './audio/tts-register';
 import { GroqClient } from './ai/GroqClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
@@ -262,6 +264,18 @@ app.whenReady().then(async () => {
     defaultModelPath: join(app.getPath('userData'), 'models', 'ggml-base.en.bin'),
   }));
   registerSttIpc(() => mainWin, stt);
+  // Autotests record the spoken text with a fake engine, so no real audio plays and the
+  // renderer → main → engine chain is still observable.
+  const ttsSpoken: string[] = [];
+  const fakeTtsRun: RunTts = (_bin, args) => {
+    ttsSpoken.push(args[args.length - 1] ?? '');
+    return { done: Promise.resolve(), stop: () => undefined };
+  };
+  const tts = new TtsSpeaker(
+    () => ({ binaryPath: settings.effective().tts.binaryPath, voice: settings.effective().tts.voice }),
+    autotest !== 'off' ? fakeTtsRun : undefined,
+  );
+  registerTtsIpc(() => mainWin, tts);
   audio.onChange((st) => {
     if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.audioStatusChanged, st);
     visibility.setRecording(st, () => audio.stop());
@@ -292,6 +306,7 @@ app.whenReady().then(async () => {
     if (first && tap && autotest === 'ai-explain') void done.then(() => aiExplainAutotest(win, manager, tap, controller));
     if (first && autotest === 'mic-gate') void done.then(() => micGateAutotest(win, audio));
     if (first && autotest === 'stt') void done.then(() => sttAutotest(win));
+    if (first && autotest === 'tts') void done.then(() => ttsAutotest(win, controller, ttsSpoken));
     if (first && autotest === 'practice') void done.then(() => practiceAutotest(win, controller));
     if (first && autotest === 'companion') void done.then(() => companionAutotest(win, companion));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));

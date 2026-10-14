@@ -28,6 +28,12 @@ export interface Settings {
     /** Path to the whisper-cli binary, or null to use it from PATH. */
     binaryPath: string | null;
   };
+  tts: {
+    /** Path to the text-to-speech binary, or null to use `espeak-ng` from PATH. */
+    binaryPath: string | null;
+    /** Voice/language for the engine (e.g. "en", "en-us"), or null for its default. */
+    voice: string | null;
+  };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   globalShortcut: null,
   ai: { model: DEFAULT_AI_MODEL },
   stt: { modelPath: null, binaryPath: null },
+  tts: { binaryPath: null, voice: null },
 };
 
 export type SettingsPatch = {
@@ -47,6 +54,7 @@ export type SettingsPatch = {
   globalShortcut?: string | null;
   ai?: Partial<Settings['ai']>;
   stt?: Partial<Settings['stt']>;
+  tts?: Partial<Settings['tts']>;
 };
 
 export interface SettingsView {

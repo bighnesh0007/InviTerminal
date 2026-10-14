@@ -32,7 +32,9 @@ newline, so nothing runs until you press Enter.
 - **Microphone + local transcription** — off by default, a red REC badge + tray indicator
   while live; whisper.cpp transcribes **on your machine** and the audio is deleted (never uploaded).
 - **Interview practice** — the model asks questions, you answer aloud (local transcription) or
-  by typing, and it gives feedback.
+  by typing, and it gives feedback. It can optionally **read questions aloud** (a toggle in the
+  panel, off by default) using a local engine — install `espeak-ng` and the audio stays on your
+  machine.
 - **Share to phone** (Share button) — opens a one-time, TLS-encrypted link on your LAN; scan
   the QR with your phone (same WiFi) and terminal explanations are pushed to its browser.
   Off by default, LAN-only (never the internet), with a persistent "📱 Sharing" indicator.
@@ -48,7 +50,8 @@ Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 
 - **Verified live on KDE Plasma (Wayland):** capture exclusion (screenshot path), terminal,
   show/hide + tray + panic key, global shortcut, snippet library, settings/tabs, packaging
-  (AppImage + Arch), local speech-to-text, and the AI flows with stub models.
+  (AppImage + Arch), local speech-to-text, the interviewer read-aloud toggle (with a fake
+  engine, both controls), and the AI flows with stub models.
 - **Not yet verified (need you, or hardware):** the portal screencast / Google Meet checks;
   real Groq calls (add your key, then Settings → Test key); the global-shortcut restart /
   double-fire follow-ups; and Windows (needs a Windows machine).
@@ -84,8 +87,9 @@ Default keys (all in-app keys are configurable in Settings):
   the terminal works without it
 - *(optional, AI features)* a **free Groq API key** (console.groq.com; set in Settings) for
   "Explain output" and interview practice; `whisper-cli` + a ggml model for local
-  speech-to-text. Audio is transcribed locally and never uploaded; terminal text is sent to
-  Groq only after a confirm-preview that masks obvious secrets
+  speech-to-text; `espeak-ng` (or another local TTS engine) if you want the interviewer to
+  read questions aloud. Audio — both transcription and the spoken questions — stays on your
+  machine; terminal text is sent to Groq only after a confirm-preview that masks obvious secrets
 
 ## Configuration
 
@@ -97,6 +101,8 @@ them for a single run, mostly for development:
 | `INVI_MONGODB_URI` | Library → MongoDB URI | Must name its own database; non-local hosts are refused… |
 | `INVI_MONGODB_ALLOW_REMOTE` | …unless this is `1` | Snippets would leave this machine |
 | `INVI_GLOBAL_SHORTCUT` | Global shortcut | Portal shortcut, e.g. `Control+Alt+T`. Works once `inviterminal.desktop` is installed (Arch package, or `scripts/user-desktop-entry.sh install`); KDE asks you to confirm the first time |
+| `INVI_TTS_BIN` | TTS → binary | Text-to-speech engine; default `espeak-ng` on PATH |
+| `INVI_TTS_VOICE` | TTS → voice | Voice/language passed to the engine, e.g. `en` |
 | `INVI_USER_DATA_DIR` | — | Use another data directory (settings, single-instance lock); the autotests use a temp one |
 
 ## Install

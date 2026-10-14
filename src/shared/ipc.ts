@@ -1,7 +1,7 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
 import type { AiStatus } from './ai';
-import type { AudioKind, AudioStatus, SttStatus } from './audio';
+import type { AudioKind, AudioStatus, SttStatus, TtsStatus } from './audio';
 import type { CompanionStatus } from './companion';
 import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
@@ -77,6 +77,9 @@ export const IPC = {
   audioStatusChanged: 'audio:status-changed',
   sttStatus: 'stt:status',
   sttTranscribe: 'stt:transcribe',
+  ttsStatus: 'tts:status',
+  ttsSpeak: 'tts:speak',
+  ttsStop: 'tts:stop',
   practiceStart: 'practice:start',
   practiceAnswer: 'practice:answer',
   practiceCancel: 'practice:cancel',
@@ -205,6 +208,13 @@ export interface RendererApi {
     status(): Promise<SttStatus>;
     /** Transcribe 16 kHz mono WAV bytes locally. */
     transcribe(wav: Uint8Array): Promise<{ text: string; ms: number }>;
+  };
+  tts: {
+    status(): Promise<TtsStatus>;
+    /** Speak text locally (resolves when speech finishes). Cancels any utterance already playing. */
+    speak(text: string): Promise<void>;
+    /** Stop any speech in progress. */
+    stop(): void;
   };
   companion: {
     status(): Promise<CompanionStatus>;

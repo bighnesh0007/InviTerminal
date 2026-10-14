@@ -47,13 +47,20 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
 
   const aiModel = el('select');
   for (const m of AI_MODELS) aiModel.append(Object.assign(el('option', { text: AI_MODEL_LABELS[m] }), { value: m }));
-  const apiKey = Object.assign(el('input'), { type: 'password', autocomplete: 'off', placeholder: 'sk-ant-…' });
+  const apiKey = Object.assign(el('input'), { type: 'password', autocomplete: 'off', placeholder: 'gsk_…' });
   apiKey.spellcheck = false;
   const aiKeyStatus = el('span', { className: 'field-note' });
   const sttModel = el('input');
   sttModel.spellcheck = false;
   sttModel.placeholder = 'default: <data dir>/models/ggml-base.en.bin';
   const sttStatus = el('span', { className: 'field-note' });
+  const ttsBinary = el('input');
+  ttsBinary.spellcheck = false;
+  ttsBinary.placeholder = 'default: espeak-ng (on PATH)';
+  const ttsVoice = el('input');
+  ttsVoice.spellcheck = false;
+  ttsVoice.placeholder = 'voice/language, e.g. en (empty = engine default)';
+  const ttsStatus = el('span', { className: 'field-note' });
 
   const field = (label: string, input: HTMLElement, note?: HTMLElement) => el('label', { className: 'lib-field' }, el('span', { text: label }), input, ...(note ? [note] : []));
 
@@ -115,6 +122,11 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     void api.stt.status().then((st) => {
       sttStatus.textContent = st.available ? `Speech-to-text ready — ${st.binary}, ${st.model}` : `Not ready — ${st.reason}`;
     });
+    ttsBinary.value = s.tts.binaryPath ?? '';
+    ttsVoice.value = s.tts.voice ?? '';
+    void api.tts.status().then((st) => {
+      ttsStatus.textContent = st.available ? `Text-to-speech ready — ${st.binary}${st.voice ? `, voice ${st.voice}` : ''}` : `Not ready — ${st.reason}`;
+    });
     for (const [input, path] of [[mongoUri, 'library.mongoUri'], [allowRemote, 'library.allowRemote'], [globalShortcut, 'globalShortcut']] as const) {
       input.disabled = view.overriddenByEnv.includes(path);
       input.title = input.disabled ? 'Set by an INVI_* environment variable for this run' : '';
@@ -136,7 +148,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
       aiKeyStatus.textContent = 'No OS keychain is available, so a key cannot be stored. Use the GROQ_API_KEY environment variable.';
     } else {
       apiKey.disabled = false;
-      apiKey.placeholder = 'sk-ant-…';
+      apiKey.placeholder = 'gsk_…';
       aiKeyStatus.textContent = st.key.present ? `A key is stored in your OS keychain (${st.key.hint}).` : 'No key stored. Paste one and click Save key.';
     }
   }
@@ -167,6 +179,10 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     if (aiModel.value !== s.ai.model) patch.ai = { model: aiModel.value as (typeof AI_MODELS)[number] };
     const sm = sttModel.value.trim() || null;
     if (sm !== s.stt.modelPath) patch.stt = { modelPath: sm };
+    const tb = ttsBinary.value.trim() || null;
+    if (tb !== s.tts.binaryPath) patch.tts = { ...patch.tts, binaryPath: tb };
+    const tv = ttsVoice.value.trim() || null;
+    if (tv !== s.tts.voice) patch.tts = { ...patch.tts, voice: tv };
     view = await api.settings.update(patch);
     // Leave any shortcut field, so the next key press acts instead of being recorded.
     if (document.activeElement instanceof HTMLElement && panel.contains(document.activeElement)) document.activeElement.blur();
@@ -217,6 +233,10 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     el('h3', { text: 'Speech-to-text (local whisper.cpp)' }),
     field('Whisper model path', sttModel, sttStatus),
     el('span', { className: 'field-note', text: 'Transcription runs on your machine with whisper-cli; audio is never uploaded. Download a ggml model (e.g. ggml-base.en.bin) and point this at it.' }),
+    el('h3', { text: 'Text-to-speech (local, for interview practice)' }),
+    field('TTS binary', ttsBinary, ttsStatus),
+    field('Voice', ttsVoice),
+    el('span', { className: 'field-note', text: 'The interviewer can read questions aloud (toggle it on in the Practice panel). Speech is generated on your machine — install espeak-ng (e.g. "sudo pacman -S espeak-ng"), or point this at another engine that accepts [-v VOICE] followed by the text.' }),
     el('div', { className: 'lib-actions' }, button('Save', save, say), button('Revert', () => load(), say)),
     message,
   );

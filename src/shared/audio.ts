@@ -24,3 +24,12 @@ export interface SttStatus {
   modelFound: boolean;
   reason: string | null;
 }
+
+export interface TtsStatus {
+  available: boolean;
+  binary: string;
+  binaryFound: boolean;
+  /** Voice/language passed to the engine (e.g. "en"), or null for the engine default. */
+  voice: string | null;
+  reason: string | null;
+}

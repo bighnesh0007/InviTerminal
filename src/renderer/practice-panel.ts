@@ -30,6 +30,7 @@ export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: 
 
   let aiReady = false;
   let sttReady = false;
+  let ttsReady = false;
   let running = false;
   let streaming = false;
   let current: HTMLElement | null = null; // the interviewer bubble being streamed into
@@ -47,9 +48,11 @@ export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: 
     current.textContent += c;
     convo.scrollTop = convo.scrollHeight;
   });
-  api.practice.onTurn(() => {
+  api.practice.onTurn((full) => {
     current = null;
     streaming = false;
+    // Speak the finished question aloud only when the user asked for it (off by default).
+    if (readAloud.checked && ttsReady && full.trim()) void api.tts.speak(full).catch(() => undefined);
     setControls();
   });
   api.practice.onError((m) => {
@@ -71,7 +74,12 @@ export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: 
   const recordBtn = button('🎤 Record answer', () => toggleRecord(), say);
   const sendBtn = button('Send answer', () => submitAnswer(answerText.value), say);
   const endBtn = button('End', () => endInterview(), say);
-  const answerRow = el('div', { className: 'practice-answer' }, answerText, el('div', { className: 'lib-actions' }, recordBtn, sendBtn, endBtn));
+  const readAloud = Object.assign(el('input'), { type: 'checkbox' });
+  readAloud.addEventListener('change', () => {
+    if (!readAloud.checked) api.tts.stop();
+  });
+  const readAloudLabel = el('label', { className: 'practice-tts' }, readAloud, el('span', { text: '🔊 Read questions aloud' }));
+  const answerRow = el('div', { className: 'practice-answer' }, answerText, el('div', { className: 'lib-actions' }, recordBtn, sendBtn, endBtn, readAloudLabel));
 
   function setControls(): void {
     topic.disabled = running;
@@ -83,6 +91,7 @@ export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: 
     recordBtn.disabled = busy && recorder === null;
     recordBtn.textContent = recorder ? '■ Stop & submit' : '🎤 Record answer';
     recordBtn.hidden = !sttReady;
+    readAloudLabel.hidden = !ttsReady;
   }
 
   async function startInterview(): Promise<void> {
@@ -112,6 +121,7 @@ export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: 
   async function submitAnswer(text: string): Promise<void> {
     const answer = text.trim();
     if (!answer || streaming) return;
+    api.tts.stop(); // stop the interviewer talking over the candidate
     bubble('you', answer);
     answerText.value = '';
     streaming = true;
@@ -164,6 +174,7 @@ export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: 
   }
 
   async function endInterview(): Promise<void> {
+    api.tts.stop();
     recorder?.dispose();
     recorder = null;
     await api.audio.stop();
@@ -185,6 +196,10 @@ export function mountPracticePanel(api: RendererApi, opts: { onOpenChange(open: 
   api.ai.onStatus(renderAi);
   void api.stt.status().then((s: SttStatus) => {
     sttReady = s.available;
+    setControls();
+  });
+  void api.tts.status().then((s) => {
+    ttsReady = s.available;
     setControls();
   });
 

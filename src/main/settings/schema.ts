@@ -49,6 +49,13 @@ export const SettingsSchema = z
       })
       .strict()
       .prefault({}),
+    tts: z
+      .object({
+        binaryPath: z.string().max(4096).nullable().default(d.tts.binaryPath),
+        voice: z.string().max(64).nullable().default(d.tts.voice),
+      })
+      .strict()
+      .prefault({}),
   })
   .strict();
 
@@ -61,5 +68,6 @@ export const SettingsPatchSchema = z
     globalShortcut: z.string().max(60).nullable().optional(),
     ai: z.object({ model: z.enum(AI_MODELS) }).partial().strict().optional(),
     stt: z.object({ modelPath: z.string().max(4096).nullable(), binaryPath: z.string().max(4096).nullable() }).partial().strict().optional(),
+    tts: z.object({ binaryPath: z.string().max(4096).nullable(), voice: z.string().max(64).nullable() }).partial().strict().optional(),
   })
   .strict();

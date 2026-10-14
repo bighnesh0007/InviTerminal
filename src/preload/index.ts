@@ -112,6 +112,11 @@ const api: RendererApi = {
     status: () => ipcRenderer.invoke(IPC.sttStatus),
     transcribe: (wav) => ipcRenderer.invoke(IPC.sttTranscribe, { wav }),
   },
+  tts: {
+    status: () => ipcRenderer.invoke(IPC.ttsStatus),
+    speak: (text) => ipcRenderer.invoke(IPC.ttsSpeak, { text }),
+    stop: () => ipcRenderer.send(IPC.ttsStop),
+  },
   companion: {
     status: () => ipcRenderer.invoke(IPC.companionStatus),
     onStatus: (cb) => {

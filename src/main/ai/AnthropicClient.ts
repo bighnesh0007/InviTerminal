@@ -63,6 +63,25 @@ export class AnthropicClient {
     if (final.stop_reason === 'refusal') throw new Error('The model declined to answer this request.');
     return final.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('');
   }
+
+  /** Multi-turn chat (used by interview practice). Streams assistant text; returns the full turn. */
+  async chatStream(opts: { model: AiModel; system: string; messages: { role: 'user' | 'assistant'; content: string }[] }, onDelta: (chunk: string) => void, signal?: AbortSignal): Promise<string> {
+    const client = await this.client();
+    const stream = client.messages.stream(
+      {
+        model: opts.model,
+        max_tokens: 4096,
+        thinking: { type: 'adaptive' },
+        system: opts.system,
+        messages: opts.messages.map((m) => ({ role: m.role, content: m.content })),
+      },
+      signal ? { signal } : undefined,
+    );
+    stream.on('text', (t) => onDelta(t));
+    const final = await stream.finalMessage();
+    if (final.stop_reason === 'refusal') throw new Error('The model declined to continue.');
+    return final.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join('');
+  }
 }
 
 function describeError(e: unknown): string {

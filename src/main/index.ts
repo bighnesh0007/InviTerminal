@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
-import { aiExplainAutotest, aiKeyAutotest, captureAutotest, micGateAutotest, sttAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
+import { aiExplainAutotest, aiKeyAutotest, captureAutotest, micGateAutotest, practiceAutotest, sttAutotest, createTerminalTap, libraryAutotest, settingsReadbackAutotest, tabsSettingsAutotest, portalShortcutAutotest, terminalAutotest, uiSnapshotAutotest, visibilityAutotest, type ShortcutStatus } from './autotest';
 import { classifyEnvironment } from './capture/detect';
 import { ProtectionController } from './capture/ProtectionController';
 import { createKwinProvider } from './capture/providers/kwin';
@@ -30,6 +30,7 @@ import { AnthropicClient } from './ai/AnthropicClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
 import { type ExplainStreamer, registerExplainIpc } from './ai/explain';
+import { type ChatStreamer, registerPracticeIpc } from './ai/practice';
 import { LibraryService } from './library/LibraryService';
 import { registerLibraryIpc } from './library/register';
 import { isProductionBuild } from './build-mode';
@@ -202,6 +203,8 @@ app.whenReady().then(async () => {
   // Autotests stub the model so the explain flow is verifiable without a key or network.
   const explainStreamer: ExplainStreamer = autotest !== 'off' ? stubExplainStreamer : (opts, onDelta, signal) => anthropic.explainStream(opts, onDelta, signal);
   registerExplainIpc(() => mainWin, explainStreamer, () => settings.effective().ai.model);
+  const chatStreamer: ChatStreamer = autotest !== 'off' ? stubChatStreamer : (opts, onDelta, signal) => anthropic.chatStream(opts, onDelta, signal);
+  registerPracticeIpc(() => mainWin, chatStreamer, () => settings.effective().ai.model);
 
   // Settings: applied live where possible; startup-only values are flagged as needing a restart.
   settings.onChange((v) => {
@@ -279,6 +282,7 @@ app.whenReady().then(async () => {
     if (first && tap && autotest === 'ai-explain') void done.then(() => aiExplainAutotest(win, manager, tap, controller));
     if (first && autotest === 'mic-gate') void done.then(() => micGateAutotest(win, audio));
     if (first && autotest === 'stt') void done.then(() => sttAutotest(win));
+    if (first && autotest === 'practice') void done.then(() => practiceAutotest(win, controller));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {
@@ -358,6 +362,23 @@ const stubExplainStreamer: ExplainStreamer = async (opts, onDelta, signal) => {
     onDelta(p);
     full += p;
     await new Promise((r) => setTimeout(r, 30));
+  }
+  return full;
+};
+
+/** Deterministic fake interviewer for autotests: a question, or feedback + next question. */
+const stubChatStreamer: ChatStreamer = async (opts, onDelta, signal) => {
+  const last = opts.messages[opts.messages.length - 1];
+  const isAnswer = last?.role === 'user' && last.content !== 'Please begin the interview.';
+  const parts = isAnswer
+    ? ['Feedback: good start. ', 'Next question: explain how you would scale it?']
+    : ['[stub interviewer] ', 'Question 1: tell me about yourself.'];
+  let full = '';
+  for (const p of parts) {
+    if (signal.aborted) throw new Error('aborted');
+    onDelta(p);
+    full += p;
+    await new Promise((r) => setTimeout(r, 25));
   }
   return full;
 };

@@ -121,3 +121,12 @@ textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; 
 @keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 .audio-panel .mic-meter { height: 14px; background: var(--bg); border: 1px solid #333844; border-radius: 7px; overflow: hidden; margin: 6px 0; }
 .mic-meter-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #2e9d5b, #c98a1b, #d0423a); transition: width 60ms linear; }
+/* ---- interview practice --------------------------------------------------------------- */
+.practice-panel { display: flex; flex-direction: column; }
+.practice-convo { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 6px 0; }
+.bubble { background: var(--bg); border: 1px solid #23262e; border-radius: 8px; padding: 6px 8px; }
+.bubble.you { border-color: #33485e; }
+.bubble-who { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+.bubble-text { white-space: pre-wrap; word-break: break-word; font-size: 13px; margin-top: 2px; }
+.practice-answer[hidden] { display: none; }
+.practice-answer textarea { width: 100%; }

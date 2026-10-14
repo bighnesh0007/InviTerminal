@@ -1,6 +1,6 @@
 import type { RendererApi } from '../shared/ipc';
 import { AUDIO_KIND_LABEL, type AudioStatus, type SttStatus } from '../shared/audio';
-import { encodeWav } from '../shared/wav';
+import { createMicRecorder, type MicRecorder } from './mic-recorder';
 import { button, el } from './dom';
 
 export interface AudioPanelView {
@@ -34,12 +34,7 @@ export function mountAudioPanel(api: RendererApi, opts: { onOpenChange(open: boo
 
   let status: AudioStatus = { active: false, kind: null, since: null, meetingConsented: false };
   let stt: SttStatus | null = null;
-  let stream: MediaStream | null = null;
-  let audioCtx: AudioContext | null = null;
-  let analyser: AnalyserNode | null = null;
-  let capture: ScriptProcessorNode | null = null;
-  let chunks: Float32Array[] = [];
-  let raf = 0;
+  let recorder: MicRecorder | null = null;
   let transcribing = false;
 
   function fmtElapsed(sinceIso: string): string {
@@ -69,54 +64,21 @@ export function mountAudioPanel(api: RendererApi, opts: { onOpenChange(open: boo
   });
 
   function teardown(): void {
-    cancelAnimationFrame(raf);
-    capture?.disconnect();
-    analyser?.disconnect();
-    capture = null;
-    analyser = null;
-    stream?.getTracks().forEach((t) => t.stop());
-    stream = null;
-    void audioCtx?.close();
-    audioCtx = null;
+    recorder?.dispose();
+    recorder = null;
     meterFill.style.width = '0%';
   }
 
   async function startCapture(): Promise<void> {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    audioCtx = new AudioContext();
-    const src = audioCtx.createMediaStreamSource(stream);
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    src.connect(analyser);
-    // ScriptProcessor is deprecated but dependency-free; fine for short dictation clips.
-    capture = audioCtx.createScriptProcessor(4096, 1, 1);
-    chunks = [];
-    capture.onaudioprocess = (ev) => chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
-    src.connect(capture);
-    capture.connect(audioCtx.destination);
-    const data = new Uint8Array(analyser.frequencyBinCount);
-    const loop = () => {
-      analyser!.getByteTimeDomainData(data);
-      let peak = 0;
-      for (const v of data) peak = Math.max(peak, Math.abs(v - 128));
-      meterFill.style.width = `${Math.min(100, Math.round((peak / 128) * 140))}%`;
-      raf = requestAnimationFrame(loop);
-    };
-    loop();
+    recorder = createMicRecorder((level) => (meterFill.style.width = `${Math.min(100, Math.round(level * 140))}%`));
+    await recorder.start();
   }
 
   async function transcribe(): Promise<void> {
-    const rate = audioCtx?.sampleRate ?? 48000;
-    const total = chunks.reduce((n, c) => n + c.length, 0);
-    const pcm = new Float32Array(total);
-    let off = 0;
-    for (const c of chunks) {
-      pcm.set(c, off);
-      off += c.length;
-    }
-    teardown();
+    const rec = recorder?.stopAndEncode();
+    recorder = null;
     await api.audio.stop();
-    if (total === 0) {
+    if (!rec || rec.samples === 0) {
       say('No audio was captured.');
       return;
     }
@@ -124,10 +86,9 @@ export function mountAudioPanel(api: RendererApi, opts: { onOpenChange(open: boo
     recordBtn.disabled = true;
     say('Transcribing locally…');
     try {
-      const wav = encodeWav(pcm, rate);
-      const r = await api.stt.transcribe(wav);
+      const r = await api.stt.transcribe(rec.wav);
       transcript.textContent = r.text || '(no speech detected)';
-      say(`Transcribed ${(total / rate).toFixed(1)}s of audio in ${(r.ms / 1000).toFixed(1)}s. Audio was not saved.`);
+      say(`Transcribed ${rec.seconds.toFixed(1)}s of audio in ${(r.ms / 1000).toFixed(1)}s. Audio was not saved.`);
     } catch (e) {
       say(`Transcription failed: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`);
     } finally {

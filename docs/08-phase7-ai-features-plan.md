@@ -1,6 +1,6 @@
 ---
 type: decision-record
-status: 7a–7d built and verified (explain, mic gate, local STT); 7e (interview practice) next
+status: Phase 7 complete — 7a–7e built and verified (explain, mic gate, local STT, interview practice). Real Anthropic round-trips need the user's key.
 verified-on: 2026-10-14
 ---
 
@@ -359,6 +359,33 @@ output is whisper-readable; 188 tests total; `npm audit --omit=dev` 0. **Live
 (`INVI_AUTOTEST=stt`, real renderer IPC):** the sample transcribed correctly in ~1.2 s with
 **0 temp files leaked** (audio deleted). `isWav` was found too strict (assumed canonical
 44-byte header) and fixed to walk chunks — caught by the autotest on the real sample.
+
+## 7e — Done (2026-10-14): interview practice mode
+
+Built and verified:
+- **`AnthropicClient.chatStream`**: multi-turn streamed chat (adaptive thinking).
+- **Practice controller** (`src/main/ai/practice.ts`): one session; holds the message
+  history; `interviewerSystem(topic)` makes Claude ask one question at a time, then give
+  feedback + the next (harder) question. Abortable; streamed over IPC; injectable streamer.
+- **`mic-recorder.ts`**: extracted the capture→WAV helper; the mic panel and practice panel
+  now share one implementation (removed the duplication).
+- **Practice panel** (`src/renderer/practice-panel.ts`): topic + presets, a streamed
+  conversation (interviewer / you bubbles), answer by **recording** (mic → local transcribe
+  via 7d) **or typing**, and End. Behind the gate. The record button hides when STT is
+  unavailable (type instead).
+
+Verified: `interviewerSystem` unit tests; 188 tests total; `npm audit --omit=dev` 0; capture
+regression passes. **Live (`INVI_AUTOTEST=practice`, stub interviewer, no key/network):**
+Start → the first question streams into an interviewer bubble; a typed answer appears as a
+"You" bubble; the next turn streams **feedback + the next question** with two interviewer
+turns (multi-turn history maintained); removing protection **conceals** the panel; End hides
+the answer row. Screenshot in `docs/`. **Not verified:** real questions/feedback from
+Anthropic (no key in this environment) and the record→transcribe→submit path end to end
+(the mic + STT pieces are verified in 7c/7d; practice reuses them).
+
+A harness bug was caught and fixed: the autotest's sync `until` was given async predicates
+(a Promise is always truthy), so it returned before the stream arrived; replaced with an
+awaiting `waitFor`.
 
 ## 7. Decisions (made 2026-10-14)
 

@@ -779,3 +779,59 @@ export async function sttAutotest(win: BrowserWindow): Promise<void> {
   }
   win.close();
 }
+
+/** Phase 7e: the interview practice loop through the real renderer with the stub interviewer. */
+export async function practiceAutotest(win: BrowserWindow, controller: ProtectionController): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  const clickIn = (scope: string, text: string) =>
+    js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
+  const bubbles = () => js<{ who: string; text: string }[]>(`[...document.querySelectorAll('.practice-convo .bubble')].map(b => ({ who: b.querySelector('.bubble-who').textContent, text: b.querySelector('.bubble-text').textContent }))`);
+  const waitFor = async (pred: () => Promise<boolean>, ms = 10_000): Promise<boolean> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (await pred()) return true;
+      await sleep(80);
+    }
+    return false;
+  };
+  try {
+    await until('renderer', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
+    await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
+
+    await js(`window.inviterminal.ai.setKey('sk-ant-fake-practice-autotest-0123456789')`);
+    await sleep(300);
+    await clickIn('header', 'Practice');
+    await sleep(200);
+
+    await js(`(() => { const t = document.querySelector('.practice-panel input'); t.value = 'system design'; })()`);
+    await clickIn('.practice-panel .lib-field', 'Start interview');
+    await waitFor(async () => (await bubbles()).some((b) => b.who === 'Interviewer' && /Question 1/.test(b.text)));
+    log('started', { bubbles: await bubbles() });
+
+    // Type an answer and send → feedback + next question.
+    await js(`(() => { const a = document.querySelector('.practice-answer textarea'); a.value = 'I would start by clarifying requirements and estimating scale.'; })()`);
+    await clickIn('.practice-answer', 'Send answer');
+    await waitFor(async () => (await bubbles()).filter((b) => b.who === 'Interviewer').length >= 2 && /Next question/.test((await bubbles()).at(-1)?.text ?? ''));
+    const bs = await bubbles();
+    log('answered', {
+      youBubble: bs.find((b) => b.who === 'You')?.text.slice(0, 50),
+      interviewerTurns: bs.filter((b) => b.who === 'Interviewer').length,
+      lastHasNextQuestion: /Next question/.test(bs[bs.length - 1]?.text ?? ''),
+    });
+
+    if (process.env.INVI_SNAPSHOT_PATH) await writeFile(process.env.INVI_SNAPSHOT_PATH, (await win.webContents.capturePage()).toPNG());
+    // Behind the gate: removing protection conceals the panel.
+    await controller.unprotect();
+    await sleep(300);
+    const concealed = await js<string>(`getComputedStyle(document.querySelector('.practice-panel')).visibility`);
+    log('gated', { visibility: concealed });
+    await controller.protect();
+
+    await clickIn('.practice-panel', 'End');
+    await sleep(200);
+    log('ended', { answerRowHidden: await js<boolean>(`document.querySelector('.practice-answer').hidden`) });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}

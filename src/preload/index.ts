@@ -111,6 +111,21 @@ const api: RendererApi = {
     status: () => ipcRenderer.invoke(IPC.sttStatus),
     transcribe: (wav) => ipcRenderer.invoke(IPC.sttTranscribe, { wav }),
   },
+  practice: {
+    start: (topic) => ipcRenderer.invoke(IPC.practiceStart, { topic }),
+    answer: (answer) => ipcRenderer.invoke(IPC.practiceAnswer, { answer }),
+    cancel: () => ipcRenderer.send(IPC.practiceCancel),
+    end: () => ipcRenderer.invoke(IPC.practiceEnd),
+    onDelta: (cb) => {
+      ipcRenderer.on(IPC.practiceDelta, (_e, c: string) => cb(c));
+    },
+    onTurn: (cb) => {
+      ipcRenderer.on(IPC.practiceTurn, (_e, f: string) => cb(f));
+    },
+    onError: (cb) => {
+      ipcRenderer.on(IPC.practiceError, (_e, m: string) => cb(m));
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld('inviterminal', api);

@@ -76,6 +76,16 @@ export const IPC = {
   audioStatusChanged: 'audio:status-changed',
   sttStatus: 'stt:status',
   sttTranscribe: 'stt:transcribe',
+  practiceStart: 'practice:start',
+  practiceAnswer: 'practice:answer',
+  practiceCancel: 'practice:cancel',
+  practiceEnd: 'practice:end',
+  /** main → renderer */
+  practiceDelta: 'practice:delta',
+  /** main → renderer */
+  practiceTurn: 'practice:turn',
+  /** main → renderer */
+  practiceError: 'practice:error',
 } as const;
 
 export interface ConcealRequest {
@@ -189,5 +199,14 @@ export interface RendererApi {
     status(): Promise<SttStatus>;
     /** Transcribe 16 kHz mono WAV bytes locally. */
     transcribe(wav: Uint8Array): Promise<{ text: string; ms: number }>;
+  };
+  practice: {
+    start(topic: string): Promise<void>;
+    answer(answer: string): Promise<void>;
+    cancel(): void;
+    end(): Promise<void>;
+    onDelta(cb: (chunk: string) => void): void;
+    onTurn(cb: (full: string) => void): void;
+    onError(cb: (message: string) => void): void;
   };
 }

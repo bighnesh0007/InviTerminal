@@ -41,6 +41,18 @@ describe('pairing helpers', () => {
     const a = lanAddress();
     expect(a === null || /^\d{1,3}(\.\d{1,3}){3}$/.test(a)).toBe(true);
   });
+
+  it('lanAddress prefers a physical NIC over docker/VPN interfaces a phone cannot reach', () => {
+    const v4 = (address: string, internal = false) => ({ address, family: 'IPv4' as const, internal, netmask: '', mac: '', cidr: null });
+    // docker0 enumerated FIRST — the old code returned 172.17.0.1 (unreachable from the phone).
+    expect(lanAddress({ docker0: [v4('172.17.0.1')], wlp1s0: [v4('192.168.1.6')] })).toBe('192.168.1.6');
+    // loopback is skipped; a real NIC wins.
+    expect(lanAddress({ lo: [v4('127.0.0.1', true)], eth0: [v4('10.0.0.5')] })).toBe('10.0.0.5');
+    // only virtual present → fall back to it rather than null.
+    expect(lanAddress({ docker0: [v4('172.17.0.1')] })).toBe('172.17.0.1');
+    // nothing usable → null.
+    expect(lanAddress({ lo: [v4('127.0.0.1', true)] })).toBeNull();
+  });
 });
 
 describe('CompanionServer', () => {
@@ -122,5 +134,24 @@ describe('CompanionServer', () => {
     server = new CompanionServer();
     await server.start(HOST);
     await expect(server.start(HOST)).rejects.toThrow(/already running/);
+  });
+
+  it('binds the fixed port it is given (so one firewall rule keeps working)', async () => {
+    server = new CompanionServer();
+    const s = await server.start(HOST, 0); // ask the OS for a free one, then reuse it as a "fixed" port
+    const fixed = s.port;
+    await server.stop();
+    server = new CompanionServer();
+    const s2 = await server.start(HOST, fixed);
+    expect(s2.port).toBe(fixed);
+  });
+
+  it('reports a clear error and cleans up when the fixed port is already taken', async () => {
+    server = new CompanionServer();
+    const s = await server.start(HOST, 0);
+    const second = new CompanionServer();
+    await expect(second.start(HOST, s.port)).rejects.toThrow(/already in use/);
+    // The failed start left nothing running, so it isn't stuck "already running".
+    expect(second.isRunning).toBe(false);
   });
 });

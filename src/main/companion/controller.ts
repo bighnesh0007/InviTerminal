@@ -12,7 +12,11 @@ export class CompanionController {
   private started: { url: string; host: string; port: number; fingerprint256: string } | null = null;
   private qrDataUrl = '';
 
-  constructor(private readonly onChange: (s: CompanionStatus) => void) {
+  /** @param getPort the configured TCP port (0 = random). A fixed port lets the user keep one firewall rule. */
+  constructor(
+    private readonly onChange: (s: CompanionStatus) => void,
+    private readonly getPort: () => number = () => 0,
+  ) {
     this.server = new CompanionServer(() => this.emit());
   }
 
@@ -29,7 +33,7 @@ export class CompanionController {
     if (this.started) return this.status();
     const host = lanAddress();
     if (!host) throw new Error('No LAN network found — connect to the same WiFi as your phone.');
-    this.started = await this.server.start(host);
+    this.started = await this.server.start(host, this.getPort());
     // QR holds the full tokenised URL; generated in main so qrcode stays out of the renderer bundle.
     this.qrDataUrl = await toDataURL(this.started.url, { margin: 1, width: 240, errorCorrectionLevel: 'M' });
     this.emit();

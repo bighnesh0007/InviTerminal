@@ -15,6 +15,7 @@ export interface EnvOverrides {
   sttBinaryPath?: string;
   ttsBinaryPath?: string;
   ttsVoice?: string;
+  companionPort?: number;
 }
 
 const FILE = 'settings.json';
@@ -78,6 +79,7 @@ export class SettingsStore {
     if (this.env.sttBinaryPath !== undefined) s.stt.binaryPath = this.env.sttBinaryPath;
     if (this.env.ttsBinaryPath !== undefined) s.tts.binaryPath = this.env.ttsBinaryPath;
     if (this.env.ttsVoice !== undefined) s.tts.voice = this.env.ttsVoice;
+    if (this.env.companionPort !== undefined) s.companion.port = this.env.companionPort;
     return s;
   }
 
@@ -97,6 +99,7 @@ export class SettingsStore {
     if (this.env.sttBinaryPath !== undefined) overriddenByEnv.push('stt.binaryPath');
     if (this.env.ttsBinaryPath !== undefined) overriddenByEnv.push('tts.binaryPath');
     if (this.env.ttsVoice !== undefined) overriddenByEnv.push('tts.voice');
+    if (this.env.companionPort !== undefined) overriddenByEnv.push('companion.port');
     const restartRequired = RESTART_PATHS.filter((k) => JSON.stringify(this.effective()[k]) !== JSON.stringify(this.startupValue(k)));
     return { effective: this.effective(), overriddenByEnv, restartRequired: [...restartRequired], file: this.path, loadWarning: this.loadWarning };
   }
@@ -120,6 +123,7 @@ export class SettingsStore {
         ai: { ...this.stored.ai, ...patch.ai },
         stt: { ...this.stored.stt, ...patch.stt },
         tts: { ...this.stored.tts, ...patch.tts },
+        companion: { ...this.stored.companion, ...patch.companion },
       };
       const result = SettingsSchema.safeParse(merged);
       if (!result.success) throw new Error(result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));

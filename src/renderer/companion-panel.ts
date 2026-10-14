@@ -42,11 +42,15 @@ export function mountCompanionPanel(api: RendererApi, opts: { onOpenChange(open:
     qrWrap.hidden = !s.running || !s.qrDataUrl;
     if (s.running && s.qrDataUrl) qrImg.src = s.qrDataUrl;
     if (s.running) {
+      const subnet = s.host ? `${s.host.split('.').slice(0, 3).join('.')}.0/24` : '192.168.0.0/24';
+      const ufw = `sudo ufw allow from ${subnet} to any port ${s.port} proto tcp`;
       info.replaceChildren(
         el('p', { className: 'field-note', text: `Scan with your phone's camera on the same WiFi. Address: https://${s.host}:${s.port}` }),
         el('p', { className: 'field-note', text: `Your phone will warn about the certificate — confirm this fingerprint matches, then proceed:` }),
         el('p', { className: 'fp', text: s.fingerprint ?? '' }),
         el('p', { className: 'field-note', text: `${s.clients} phone(s) paired. Explanations you run will appear there. Nothing else is shared.` }),
+        el('p', { className: 'field-note', text: `Phone stuck on "loading"? Your firewall is likely blocking the port. Allow it once (same port every time):` }),
+        el('p', { className: 'fp', text: ufw }),
       );
     } else {
       info.replaceChildren();

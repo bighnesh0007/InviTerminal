@@ -61,6 +61,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   ttsVoice.spellcheck = false;
   ttsVoice.placeholder = 'voice/language, e.g. en (empty = engine default)';
   const ttsStatus = el('span', { className: 'field-note' });
+  const companionPort = Object.assign(el('input'), { type: 'number', min: '0', max: '65535' });
 
   const field = (label: string, input: HTMLElement, note?: HTMLElement) => el('label', { className: 'lib-field' }, el('span', { text: label }), input, ...(note ? [note] : []));
 
@@ -127,6 +128,8 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     void api.tts.status().then((st) => {
       ttsStatus.textContent = st.available ? `Text-to-speech ready — ${st.binary}${st.voice ? `, voice ${st.voice}` : ''}` : `Not ready — ${st.reason}`;
     });
+    companionPort.value = String(s.companion.port);
+    companionPort.disabled = view.overriddenByEnv.includes('companion.port');
     for (const [input, path] of [[mongoUri, 'library.mongoUri'], [allowRemote, 'library.allowRemote'], [globalShortcut, 'globalShortcut']] as const) {
       input.disabled = view.overriddenByEnv.includes(path);
       input.title = input.disabled ? 'Set by an INVI_* environment variable for this run' : '';
@@ -183,6 +186,8 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     if (tb !== s.tts.binaryPath) patch.tts = { ...patch.tts, binaryPath: tb };
     const tv = ttsVoice.value.trim() || null;
     if (tv !== s.tts.voice) patch.tts = { ...patch.tts, voice: tv };
+    const cp = Number(companionPort.value);
+    if (!view.overriddenByEnv.includes('companion.port') && cp !== s.companion.port) patch.companion = { port: cp };
     view = await api.settings.update(patch);
     // Leave any shortcut field, so the next key press acts instead of being recorded.
     if (document.activeElement instanceof HTMLElement && panel.contains(document.activeElement)) document.activeElement.blur();
@@ -237,6 +242,9 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     field('TTS binary', ttsBinary, ttsStatus),
     field('Voice', ttsVoice),
     el('span', { className: 'field-note', text: 'The interviewer can read questions aloud (toggle it on in the Practice panel). Speech is generated on your machine — install espeak-ng (e.g. "sudo pacman -S espeak-ng"), or point this at another engine that accepts [-v VOICE] followed by the text.' }),
+    el('h3', { text: 'Share to phone' }),
+    field('Port', companionPort),
+    el('span', { className: 'field-note', text: 'The LAN port your phone connects to. A fixed port means you add a firewall rule only once; set it to 0 for a random port each time. If your phone can’t connect, the exact firewall command is shown in the Share panel while sharing.' }),
     el('div', { className: 'lib-actions' }, button('Save', save, say), button('Revert', () => load(), say)),
     message,
   );

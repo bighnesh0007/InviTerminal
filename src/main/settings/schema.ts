@@ -56,6 +56,18 @@ export const SettingsSchema = z
       })
       .strict()
       .prefault({}),
+    companion: z
+      .object({
+        port: z
+          .number()
+          .int()
+          .min(0)
+          .max(65535)
+          .refine((p) => p === 0 || p >= 1024, 'use 0 (random) or a port between 1024 and 65535')
+          .default(d.companion.port),
+      })
+      .strict()
+      .prefault({}),
   })
   .strict();
 
@@ -69,5 +81,6 @@ export const SettingsPatchSchema = z
     ai: z.object({ model: z.enum(AI_MODELS) }).partial().strict().optional(),
     stt: z.object({ modelPath: z.string().max(4096).nullable(), binaryPath: z.string().max(4096).nullable() }).partial().strict().optional(),
     tts: z.object({ binaryPath: z.string().max(4096).nullable(), voice: z.string().max(64).nullable() }).partial().strict().optional(),
+    companion: z.object({ port: z.number().int().min(0).max(65535).refine((p) => p === 0 || p >= 1024, 'use 0 (random) or a port between 1024 and 65535') }).partial().strict().optional(),
   })
   .strict();

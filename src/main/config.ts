@@ -20,6 +20,8 @@ const EnvSchema = z.object({
   /** Overrides settings.json for this run: text-to-speech binary and voice. */
   INVI_TTS_BIN: z.string().optional(),
   INVI_TTS_VOICE: z.string().optional(),
+  /** Overrides settings.json for this run: the companion TCP port (0 = random). */
+  INVI_COMPANION_PORT: z.coerce.number().int().min(0).max(65535).optional(),
   /** Use another app data directory (settings, single-instance lock). Autotests use a temp dir so real settings are never touched. */
   INVI_USER_DATA_DIR: z.string().regex(/^\/.+/).optional(),
 });
@@ -68,4 +70,5 @@ export const settingsEnvOverrides = {
   ...(env.INVI_WHISPER_BIN !== undefined ? { sttBinaryPath: env.INVI_WHISPER_BIN } : {}),
   ...(env.INVI_TTS_BIN !== undefined ? { ttsBinaryPath: env.INVI_TTS_BIN } : {}),
   ...(env.INVI_TTS_VOICE !== undefined ? { ttsVoice: env.INVI_TTS_VOICE } : {}),
+  ...(env.INVI_COMPANION_PORT !== undefined ? { companionPort: env.INVI_COMPANION_PORT } : {}),
 };

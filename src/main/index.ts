@@ -204,10 +204,14 @@ app.whenReady().then(async () => {
   const groq = new GroqClient(() => keyStore.getKey());
   registerAiIpc(() => mainWin, keyStore, groq, () => settings.effective().ai.model);
   // Autotests stub the model so the explain flow is verifiable without a key or network.
-  const companion = new CompanionController((st) => {
-    if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.companionStatusChanged, st);
-    visibility.setSharing(st.running, st.clients, () => void companion.stop());
-  });
+  const companion = new CompanionController(
+    (st) => {
+      if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.companionStatusChanged, st);
+      visibility.setSharing(st.running, st.clients, () => void companion.stop());
+    },
+    // Autotests use a random free port so they never collide with a real session's fixed port.
+    () => (autotest !== 'off' ? 0 : settings.effective().companion.port),
+  );
   ipcMain.handle(IPC.companionStatus, guard(() => companion.status()));
   ipcMain.handle(IPC.companionStart, guard(() => companion.start()));
   ipcMain.handle(IPC.companionStop, guard(() => companion.stop()));

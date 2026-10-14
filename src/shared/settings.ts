@@ -34,6 +34,10 @@ export interface Settings {
     /** Voice/language for the engine (e.g. "en", "en-us"), or null for its default. */
     voice: string | null;
   };
+  companion: {
+    /** TCP port for "Share to phone". A fixed port lets you keep one firewall rule; 0 = random each time. */
+    port: number;
+  };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -45,6 +49,8 @@ export const DEFAULT_SETTINGS: Settings = {
   ai: { model: DEFAULT_AI_MODEL },
   stt: { modelPath: null, binaryPath: null },
   tts: { binaryPath: null, voice: null },
+  // A fixed default so one firewall rule keeps working; the user can change it or set 0 for random.
+  companion: { port: 41830 },
 };
 
 export type SettingsPatch = {
@@ -55,6 +61,7 @@ export type SettingsPatch = {
   ai?: Partial<Settings['ai']>;
   stt?: Partial<Settings['stt']>;
   tts?: Partial<Settings['tts']>;
+  companion?: Partial<Settings['companion']>;
 };
 
 export interface SettingsView {

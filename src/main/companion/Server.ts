@@ -71,13 +71,19 @@ export class CompanionServer {
     return n;
   }
 
-  async start(host: string): Promise<Started> {
+  /** @param port the TCP port to bind; 0 picks a random free one. A fixed port lets the user keep a single firewall rule. */
+  async start(host: string, port = 0): Promise<Started> {
     if (this.https) throw new Error('Companion server already running.');
     const { key, cert, fingerprint256 } = await generateCert(host);
     this.token = newToken();
 
     const server = createServer({ key, cert }, (req, res) => this.serve(req, res, fingerprint256));
+    // Always-attached: a server 'error' (failed bind, or a later client-socket error) must never
+    // reach Node's unhandled path and crash the app. The listen promise handles the first one.
+    let onStartError: ((e: NodeJS.ErrnoException) => void) | null = null;
+    server.on('error', (err: NodeJS.ErrnoException) => onStartError?.(err));
     this.wss = new WebSocketServer({ server, verifyClient: (info, cb) => this.verify(info.origin, info.req.headers['sec-websocket-protocol'], cb) });
+    this.wss.on('error', () => undefined); // never let a ws-level error reach Node's unhandled path
     this.wss.on('connection', (ws) => {
       ws.send(JSON.stringify({ type: 'hello' } satisfies PushMessage));
       this.onClients(this.clientCount);
@@ -85,13 +91,22 @@ export class CompanionServer {
     });
 
     await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, host, () => resolve());
+      onStartError = (err) => {
+        onStartError = null; // ignore any further errors; they're handled by the no-op above
+        // Clean up the half-built server so a retry (e.g. with port 0) can succeed.
+        this.wss?.close();
+        this.wss = null;
+        reject(err.code === 'EADDRINUSE' ? new Error(`Port ${port} is already in use. Pick another companion port in Settings, or set it to 0 for a random one.`) : err);
+      };
+      server.listen(port, host, () => {
+        onStartError = null; // past the bind; leave the no-op handler attached for the server's life
+        resolve();
+      });
     });
     this.https = server;
-    const port = (server.address() as AddressInfo).port;
-    this.origin = `https://${host}:${port}`;
-    return { url: `${this.origin}/#t=${this.token}`, host, port, fingerprint256 };
+    const boundPort = (server.address() as AddressInfo).port;
+    this.origin = `https://${host}:${boundPort}`;
+    return { url: `${this.origin}/#t=${this.token}`, host, port: boundPort, fingerprint256 };
   }
 
   /** WS auth: the token is offered as a subprotocol (not a URL param, so not in logs). */

@@ -847,9 +847,12 @@ export async function ttsAutotest(win: BrowserWindow, controller: ProtectionCont
 }
 
 /**
- * Phase 1 (live transcript): drives the real renderer with a FAKE capture (scripted zero chunks)
- * and a scripted transcriber, so the consent gate → capture → chunk → transcribe → line → panel
- * chain is observable without real audio or the whisper model. Also checks consent is required.
+ * Live transcript (Phases 1 + 10): drives the real renderer with a FAKE capture (scripted zero
+ * chunks, delivered in small buffers like real recorders) and a scripted transcriber, so the whole
+ * Live surface is observable without real audio, the whisper model, or a network: consent gate,
+ * You/Them speaker mode, rename, search, pause/resume, edit, per-line Ask + follow-up + Longer,
+ * select none/all, Ask selected, Summarize, copy, transcript + answer pushes to a paired phone, and
+ * the backlog a late-joining phone receives.
  */
 export async function liveTranscriptAutotest(
   win: BrowserWindow,
@@ -858,8 +861,9 @@ export async function liveTranscriptAutotest(
 ): Promise<void> {
   const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
   const clickIn = (scope: string, text: string) =>
-    js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
-  const lines = () => js<string[]>(`[...document.querySelectorAll('.live-feed .live-line .live-text')].map(e => e.textContent)`);
+    js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)} && !x.hidden); if (!b || b.disabled) return false; b.click(); return true; })()`);
+  const lines = () => js<string[]>(`[...document.querySelectorAll('.live-feed .live-item:not([hidden]) .live-text')].map(e => e.textContent)`);
+  const speakers = () => js<string[]>(`[...document.querySelectorAll('.live-feed .live-speaker')].map(e => e.textContent)`);
   const waitFor = async (pred: () => Promise<boolean>, ms = 12_000): Promise<boolean> => {
     const end = Date.now() + ms;
     while (Date.now() < end) {
@@ -869,85 +873,127 @@ export async function liveTranscriptAutotest(
     return false;
   };
   const { WebSocket } = await import('ws');
-  let ws: { close(): void } | null = null;
-  const pushed: { title?: string; text?: string }[] = [];
+  const sockets: { close(): void }[] = [];
+  type Msg = { type: string; title?: string; text?: string; speaker?: string; seq?: number };
+  /** Pair a "phone" and collect everything it receives. */
+  const pairPhone = async (): Promise<Msg[]> => {
+    const url = companion.currentUrl();
+    if (!url) throw new Error('companion not running');
+    const got: Msg[] = [];
+    const socket = new WebSocket(url.split('/#')[0]!.replace('https', 'wss') + '/', ['inviterminal', url.split('#t=')[1]!], { rejectUnauthorized: false });
+    sockets.push(socket);
+    socket.on('message', (d: Buffer) => {
+      try {
+        got.push(JSON.parse(d.toString()) as Msg);
+      } catch {
+        /* ignore */
+      }
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', () => resolve());
+      socket.once('error', reject);
+    });
+    return got;
+  };
   try {
     await until('renderer', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
     await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
-
-    // Pair a phone (WS client) so we can confirm AI answers get pushed to it.
-    try {
-      await companion.start();
-      const url = companion.currentUrl();
-      if (url) {
-        const token = url.split('#t=')[1]!;
-        const wsUrl = url.split('/#')[0]!.replace('https', 'wss') + '/';
-        const socket = new WebSocket(wsUrl, ['inviterminal', token], { rejectUnauthorized: false });
-        ws = socket;
-        socket.on('message', (d: Buffer) => {
-          try {
-            const m = JSON.parse(d.toString());
-            if (m.type !== 'hello') pushed.push({ title: m.title, text: m.text });
-          } catch {
-            /* ignore */
-          }
-        });
-        await waitFor(async () => (await js<number>(`window.inviterminal.companion.status().then(s => s.clients)`)) >= 1, 5000);
-      }
-    } catch (e) {
-      log('companion-pair-error', { message: (e as Error).message });
-    }
+    await companion.start();
+    const phone = await pairPhone();
 
     await clickIn('header', 'Live');
     await sleep(200);
+    // Negative control: Start is disabled until consent is ticked.
+    log('consent-gate', { startDisabledWithoutConsent: await js<boolean>(`[...document.querySelectorAll('.live-panel button')].find(b => b.textContent === '▶ Start').disabled`) });
 
-    // Negative control: Start is disabled until consent is checked.
-    const startDisabledNoConsent = await js<boolean>(`document.querySelector('.live-panel .lib-actions button').disabled`);
-    log('consent-gate', { startDisabledWithoutConsent: startDisabledNoConsent });
-
-    // Give consent and enable speaker-turn labels (the fake diarizer reports available).
-    await js(`document.querySelectorAll('.live-consent input')[0].click()`); // consent
-    await js(`document.querySelectorAll('.live-consent input')[1].click()`); // diarize
+    await js(`document.querySelector('.live-consent input').click()`);
+    await js(`(() => { const s = document.querySelector('.live-mode'); s.value = 'you-them'; s.dispatchEvent(new Event('change')); })()`);
     await sleep(100);
-    await clickIn('.live-panel .lib-actions', 'Start transcribing');
+    const started = await clickIn('.live-panel', '▶ Start');
+    await waitFor(async () => (await lines()).length >= 4);
+    log('you-them', { started, lines: (await lines()).length, speakers: (await speakers()).slice(0, 4) });
 
-    const gotLines = await waitFor(async () => (await lines()).length >= 2);
-    const seen = await lines();
-    const speakers = await js<string[]>(`[...document.querySelectorAll('.live-feed .live-speaker')].map(e => e.textContent)`);
-    log('transcribing', { gotLines, lineCount: seen.length, first: seen[0], speakers: speakers.slice(0, 3), badge: await js<string>(`document.querySelector('.live-badge').textContent`) });
+    // Rename "Them" → "Interviewer": every existing tag updates.
+    await js(`(() => { const i = [...document.querySelectorAll('.live-speaker-name input')].find(x => x.placeholder === 'Them'); i.value = 'Interviewer'; i.dispatchEvent(new Event('change')); })()`);
+    log('rename', { tags: [...new Set(await speakers())] });
 
-    // Ask AI about the first line (needs a key; the stub streamer answers deterministically).
+    // Search narrows the visible turns; clearing restores them.
+    const before = (await lines()).length;
+    await js(`(() => { const s = document.querySelector('.live-search'); s.value = 'walk you'; s.dispatchEvent(new Event('input')); })()`);
+    const filtered = (await lines()).length;
+    await js(`(() => { const s = document.querySelector('.live-search'); s.value = ''; s.dispatchEvent(new Event('input')); })()`);
+    log('search', { before, filtered, after: (await lines()).length });
+
+    // Pause stops recording (status + badge); Resume continues and more turns arrive.
+    await clickIn('.live-panel', '⏸ Pause');
+    await sleep(150);
+    const paused = await js<{ paused: boolean }>(`window.inviterminal.live.status()`);
+    const pausedBadge = await js<string>(`document.querySelector('.live-badge').textContent`);
+    const atPause = (await lines()).length;
+    await clickIn('.live-panel', '▶ Resume');
+    const grew = await waitFor(async () => (await lines()).length > atPause);
+    log('pause-resume', { paused: paused.paused, pausedBadge, grewAfterResume: grew });
+
+    // Edit the first line (fix a transcription mistake).
+    await js(`(() => { const it = document.querySelector('.live-item'); it.querySelector('.live-edit').click(); const t = it.querySelector('.live-text'); t.textContent = 'Tell me about a hard bug you fixed.'; t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    log('edit', { first: (await lines())[0] });
+
+    // Per-line Ask → follow-up → Longer (replaces the last answer at the next length).
     await js(`window.inviterminal.ai.setKey('gsk_fakeLiveAskAutotest0123456789abc')`);
     await waitFor(async () => !(await js<boolean>(`document.querySelector('.live-item .live-ask').disabled`)));
     await js(`document.querySelector('.live-length button[data-len="short"]').click()`);
     await js(`document.querySelector('.live-item .live-ask').click()`);
-    const gotAnswer = await waitFor(async () => /stub/.test(await js<string>(`document.querySelector('.live-item .live-answer').textContent || ''`)));
-    log('ask-ai', { gotAnswer, answer: (await js<string>(`document.querySelector('.live-item .live-answer').textContent`)).slice(0, 60) });
+    const answered = await waitFor(async () => /stub short\] Answer to: Tell me about a hard bug/.test(await js<string>(`document.querySelector('.live-slot .thread-a')?.textContent || ''`)));
+    await js(`(() => { const f = document.querySelector('.live-slot .thread-follow'); f.value = 'Can you make it shorter?'; f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+    const followed = await waitFor(async () => /followup1/.test(await js<string>(`[...document.querySelectorAll('.live-slot .thread-a')].pop()?.textContent || ''`)));
+    await waitFor(async () => !(await js<boolean>(`[...document.querySelectorAll('.live-slot .thread-btn')].find(b => b.textContent === 'Longer').disabled`)));
+    await clickIn('.live-slot', 'Longer');
+    const longer = await waitFor(async () => /stub medium followup1/.test(await js<string>(`[...document.querySelectorAll('.live-slot .thread-a')].pop()?.textContent || ''`)));
+    log('ask-thread', { answered, followed, longer, bubbles: await js<number>(`document.querySelectorAll('.live-slot .thread-a').length`) });
 
-    // New lines are auto-selected, so the count should already reflect every turn — just Ask.
+    // Select None → Ask selected disabled; All → enabled with the count; then ask.
+    await clickIn('.live-panel', 'None');
+    const noneDisabled = await js<boolean>(`document.querySelector('.live-ask-selected').disabled`);
+    await clickIn('.live-panel', 'All');
     const selLabel = await js<string>(`document.querySelector('.live-ask-selected').textContent`);
     await js(`document.querySelector('.live-ask-selected').click()`);
-    const gotSelected = await waitFor(async () => /stub/.test(await js<string>(`document.querySelector('.live-selected-answer').textContent || ''`)));
-    log('ask-selected', { selLabel, gotSelected, answer: (await js<string>(`document.querySelector('.live-selected-answer').textContent`)).slice(0, 60) });
+    const gotSelected = await waitFor(async () => /stub/.test(await js<string>(`document.querySelector('.live-results .thread-a')?.textContent || ''`)));
+    log('ask-selected', { noneDisabled, selLabel, gotSelected });
 
-    // The AI answers should have been pushed to the paired phone (WS client).
-    const pushedAnswer = await waitFor(async () => pushed.some((m) => m.title === 'AI answer'));
-    log('pushed-to-phone', { pushedAnswer, count: pushed.length, last: pushed.at(-1)?.text?.slice(0, 50) });
+    await clickIn('.live-panel', '✨ Summarize');
+    const summarized = await waitFor(async () => /summary/.test(await js<string>(`document.querySelector('.live-results .thread.summary .thread-a')?.textContent || ''`)));
+    log('summarize', { summarized });
 
-    // Behind the gate: removing protection conceals the panel.
+    if (process.env.INVI_SNAPSHOT_PATH) await writeFile(process.env.INVI_SNAPSHOT_PATH, (await win.webContents.capturePage()).toPNG());
+    await clickIn('.live-panel', 'Copy');
+    await sleep(150);
+    log('copy', { hasRenamedSpeaker: /Interviewer: /.test(await js<string>(`window.inviterminal.clipboard.read()`)) });
+
+    // Phone: transcript lines (with speakers) and answers arrived; a phone joining late gets the backlog.
+    await waitFor(async () => phone.some((m) => m.type === 'answer' && m.title === 'Summary'));
+    const late = await pairPhone();
+    await waitFor(async () => late.some((m) => m.type === 'answer'));
+    log('phone', {
+      transcriptPushed: phone.filter((m) => m.type === 'transcript').length,
+      withSpeaker: phone.some((m) => m.type === 'transcript' && m.speaker === 'Them'),
+      answers: phone.filter((m) => m.type === 'answer').map((m) => m.title),
+      lateGotBacklog: late.filter((m) => m.type === 'answer').length,
+      lateSawHello: late[0]?.type === 'hello',
+    });
+
     await controller.unprotect();
     await sleep(300);
     log('gated', { visibility: await js<string>(`getComputedStyle(document.querySelector('.live-panel')).visibility`) });
     await controller.protect();
 
-    await clickIn('.live-panel .lib-actions', 'Stop');
+    await clickIn('.live-panel', '■ Stop');
     await sleep(200);
     log('stopped', { badgeHidden: await js<boolean>(`document.querySelector('.live-badge').hidden`) });
   } catch (e) {
     log('error', { message: (e as Error).message });
   }
   try {
-    ws?.close();
+    for (const s of sockets) s.close();
     await companion.stop();
   } catch {
     /* ignore */

@@ -62,6 +62,18 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   ttsVoice.placeholder = 'voice/language, e.g. en (empty = engine default)';
   const ttsStatus = el('span', { className: 'field-note' });
   const companionPort = Object.assign(el('input'), { type: 'number', min: '0', max: '65535' });
+  const shareChecks = {
+    rememberPairing: Object.assign(el('input'), { type: 'checkbox' }),
+    autoStart: Object.assign(el('input'), { type: 'checkbox' }),
+    sendTranscript: Object.assign(el('input'), { type: 'checkbox' }),
+    mdns: Object.assign(el('input'), { type: 'checkbox' }),
+  };
+  const SHARE_LABELS: Record<keyof typeof shareChecks, string> = {
+    rememberPairing: 'Remember pairing (a phone that scanned once reconnects by itself)',
+    autoStart: 'Start sharing automatically when I start Live or ask the AI',
+    sendTranscript: 'Also send the live transcript to the phone',
+    mdns: 'Answer inviterminal.local on my network',
+  };
   const liveSource = el('input');
   liveSource.spellcheck = false;
   liveSource.placeholder = 'default: your output device’s monitor';
@@ -137,6 +149,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
       ttsStatus.textContent = st.available ? `Text-to-speech ready — ${st.binary}${st.voice ? `, voice ${st.voice}` : ''}` : `Not ready — ${st.reason}`;
     });
     companionPort.value = String(s.companion.port);
+    for (const k of Object.keys(shareChecks) as (keyof typeof shareChecks)[]) shareChecks[k].checked = s.companion[k];
     companionPort.disabled = view.overriddenByEnv.includes('companion.port');
     liveSource.value = s.liveTranscript.source ?? '';
     liveChunk.value = String(s.liveTranscript.chunkSeconds);
@@ -199,6 +212,9 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     if (tv !== s.tts.voice) patch.tts = { ...patch.tts, voice: tv };
     const cp = Number(companionPort.value);
     if (!view.overriddenByEnv.includes('companion.port') && cp !== s.companion.port) patch.companion = { port: cp };
+    for (const k of Object.keys(shareChecks) as (keyof typeof shareChecks)[]) {
+      if (shareChecks[k].checked !== s.companion[k]) patch.companion = { ...patch.companion, [k]: shareChecks[k].checked };
+    }
     const ls = liveSource.value.trim() || null;
     if (ls !== s.liveTranscript.source) patch.liveTranscript = { ...patch.liveTranscript, source: ls };
     const lc = Number(liveChunk.value);
@@ -261,6 +277,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     el('span', { className: 'field-note', text: 'The interviewer can read questions aloud (toggle it on in the Practice panel). Speech is generated on your machine — install espeak-ng (e.g. "sudo pacman -S espeak-ng"), or point this at another engine that accepts [-v VOICE] followed by the text.' }),
     el('h3', { text: 'Share to phone' }),
     field('Port', companionPort),
+    ...(Object.keys(shareChecks) as (keyof typeof shareChecks)[]).map((k) => el('label', { className: 'lib-trash' }, shareChecks[k], el('span', { text: SHARE_LABELS[k] }))),
     el('span', { className: 'field-note', text: 'The LAN port your phone connects to. A fixed port means you add a firewall rule only once; set it to 0 for a random port each time. If your phone can’t connect, the exact firewall command is shown in the Share panel while sharing.' }),
     el('h3', { text: 'Live transcript (local)' }),
     field('Capture source', liveSource),

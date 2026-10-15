@@ -8,7 +8,7 @@ mainstream screen shares and recordings on supported desktops. It does nothing
 about cameras, remote desktop, compromised machines, accessibility APIs or the
 clipboard. See [docs/01-feasibility-and-architecture.md](docs/01-feasibility-and-architecture.md) §2.5.
 
-## Status — Phase 9 (live transcript + Ask-AI, on Groq)
+## Status — Phase 10 (live transcript, Ask-AI threads, phone companion)
 
 | Platform | Status |
 |---|---|
@@ -37,15 +37,21 @@ model is the cheapest/fastest (`openai/gpt-oss-20b`):
   by typing, and it gives feedback. It can optionally **read questions aloud** (a toggle in the
   panel, off by default) using a local engine — install `espeak-ng` and the audio stays on your
   machine.
-- **Share to phone** (Share button) — opens a one-time, TLS-encrypted link on your LAN; scan
-  the QR with your phone (same WiFi) and terminal explanations are pushed to its browser.
-  Off by default, LAN-only (never the internet), with a persistent "📱 Sharing" indicator. The
-  port is fixed (Settings → Share to phone) so one firewall rule keeps working.
+- **Share to phone** (Share button) — an encrypted link on your WiFi; scan the QR once with your
+  phone and it **stays paired** (reconnects by itself; "Forget paired phones" revokes). It receives
+  AI answers, explanations and, optionally, the live transcript (Answers / Transcript tabs, Copy,
+  named devices), and catches up on anything sent while it was away. Can start automatically when
+  you use Live or Ask. LAN-only, never the internet; also reachable as `https://inviterminal.local:<port>`.
 - **Live transcript** (Live button) — transcribes the meeting/call audio playing on this machine
-  **locally** (whisper.cpp), behind a **consent gate** + a visible "● Live" indicator. Optional
-  **speaker-turn labels** (whisper tinydiarize — download the tdrz model; detection is best-effort).
-  Each line (or a set of ticked turns) has an **✨ Ask** that sends it to Groq at a chosen length
-  (Short / Medium / Detailed), masked for secrets first. Manual and visible — not an automatic feed.
+  **locally** (whisper.cpp), behind a **consent gate** + a visible "● Live" indicator.
+  - **Speakers:** Off · Turns (tinydiarize, best-effort) · **You / Them** (your mic vs the call —
+    reliable) · Stereo channels. Rename speakers ("Them" → "Interviewer"); merge consecutive turns.
+  - **Pause/Resume** (nothing recorded while paused), **search**, **edit** a line, select
+    **All/None**, **Copy**, **Export .md**.
+  - **✨ Ask** a line, or tick turns (new ones are pre-ticked) → **Ask selected**, or **✨ Summarize**
+    the conversation — Short / Medium / Detailed. Each answer is a thread with **follow-ups**,
+    **Retry / Shorter / Longer**, **Copy**, **Save** to the snippet library. Requests queue, one at a
+    time. Masked for secrets before sending. Always manual — never an automatic feed.
 
 Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 [Phase 3](docs/04-phase3-visibility-results.md) ·
@@ -54,7 +60,8 @@ Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 [Phase 6](docs/07-phase6-packaging-results.md) ·
 [Phase 7](docs/08-phase7-ai-features-plan.md) ·
 [Phase 8](docs/09-phase8-companion-plan.md) ·
-[Phase 9](docs/10-phase9-live-transcript.md).
+[Phase 9](docs/10-phase9-live-transcript.md) ·
+[Phase 10](docs/11-phase10-live-polish.md).
 
 ### Verified vs. not
 
@@ -161,6 +168,21 @@ npm run check
 That runs the TypeScript strict typecheck and the Vitest suite. The detector,
 verdict, KWin parser, environment and controller tests have each been
 deliberately broken once to confirm they fail.
+
+Two opt-in checks run against real hardware (skipped otherwise):
+
+```bash
+INVI_REAL_LIVE=1 npx vitest run test/live-real.test.ts
+```
+
+That records your real microphone + the real call audio for ~16 s in **You / Them** mode — play
+some speech (a video) through your speakers first; it must come out labelled "Them".
+
+```bash
+INVI_REAL_MDNS=1 npx vitest run test/mdns-real.test.ts
+```
+
+That checks `inviterminal.local` resolves to your LAN IP on the real network.
 
 End-to-end checks against the real system. They are development builds only, and each
 quits when done:

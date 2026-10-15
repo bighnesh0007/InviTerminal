@@ -119,8 +119,11 @@ const api: RendererApi = {
   },
   live: {
     status: () => ipcRenderer.invoke(IPC.liveStatus),
-    start: (consent, diarize) => ipcRenderer.invoke(IPC.liveStart, { consent, diarize }),
+    start: (consent, mode) => ipcRenderer.invoke(IPC.liveStart, mode ? { consent, mode } : { consent }),
     stop: () => ipcRenderer.invoke(IPC.liveStop),
+    pause: () => ipcRenderer.invoke(IPC.livePause),
+    resume: () => ipcRenderer.invoke(IPC.liveResume),
+    exportMarkdown: (markdown, suggestedName) => ipcRenderer.invoke(IPC.liveExport, { markdown, suggestedName }),
     onStatus: (cb) => {
       ipcRenderer.on(IPC.liveStatusChanged, (_e, s) => cb(s));
     },
@@ -130,7 +133,7 @@ const api: RendererApi = {
     onError: (cb) => {
       ipcRenderer.on(IPC.liveError, (_e, m: string) => cb(m));
     },
-    ask: (id, text, length) => ipcRenderer.invoke(IPC.liveAsk, { id, text, length }),
+    ask: (id, text, length, opts) => ipcRenderer.invoke(IPC.liveAsk, { id, text, length, ...(opts?.history ? { history: opts.history } : {}), ...(opts?.mode ? { mode: opts.mode } : {}) }),
     cancelAsk: () => ipcRenderer.send(IPC.liveAskCancel),
     onAnswerDelta: (cb) => {
       ipcRenderer.on(IPC.liveAnswerDelta, (_e, m) => cb(m));
@@ -149,6 +152,7 @@ const api: RendererApi = {
     },
     start: () => ipcRenderer.invoke(IPC.companionStart),
     stop: () => ipcRenderer.invoke(IPC.companionStop),
+    forget: () => ipcRenderer.invoke(IPC.companionForget),
   },
   practice: {
     start: (topic) => ipcRenderer.invoke(IPC.practiceStart, { topic }),

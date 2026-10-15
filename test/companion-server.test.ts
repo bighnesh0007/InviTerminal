@@ -1,7 +1,12 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { get } from 'node:https';
 import { WebSocket } from 'ws';
-import { CompanionServer, type PushMessage } from '../src/main/companion/Server';
+import { cleanDeviceName, CompanionServer, type Identity, type PushMessage } from '../src/main/companion/Server';
+import { generateCert } from '../src/main/companion/cert';
+import { PairingStore } from '../src/main/companion/pairing-store';
 import { lanAddress, tokensEqual } from '../src/main/companion/pairing';
 
 let server: CompanionServer | null = null;
@@ -153,5 +158,114 @@ describe('CompanionServer', () => {
     await expect(second.start(HOST, s.port)).rejects.toThrow(/already in use/);
     // The failed start left nothing running, so it isn't stuck "already running".
     expect(second.isRunning).toBe(false);
+  });
+});
+
+describe('CompanionServer — remembered pairing, backlog, device names', () => {
+  /** Connect and collect every message (hello + replay + live pushes). */
+  async function collect(port: number, token: string, opts: Record<string, unknown> = {}) {
+    const msgs: Record<string, unknown>[] = [];
+    const ws = new WebSocket(wssUrl(port), ['inviterminal', token], { rejectUnauthorized: false, ...opts });
+    ws.on('message', (d) => msgs.push(JSON.parse(d.toString())));
+    await new Promise<void>((resolve, reject) => {
+      ws.once('open', () => resolve());
+      ws.once('error', reject);
+      ws.once('unexpected-response', (_q, res) => reject(new Error(`http ${res.statusCode}`)));
+    });
+    return { ws, msgs };
+  }
+  const tokenOf = (url: string) => url.split('#t=')[1]!;
+
+  it('hello carries a session id; every push carries an increasing seq', async () => {
+    server = new CompanionServer();
+    const s = await server.start(HOST);
+    const { ws, msgs } = await collect(s.port, tokenOf(s.url));
+    server.push({ type: 'answer', title: 'AI answer', question: 'q', text: 'a1', at: new Date().toISOString() });
+    server.push({ type: 'transcript', text: 'hello there', speaker: 'Them', at: new Date().toISOString() });
+    await vi.waitFor(() => expect(msgs.length).toBe(3));
+    expect(msgs[0]).toMatchObject({ type: 'hello', session: expect.stringMatching(/^[0-9a-f]{12}$/) });
+    expect(msgs[1]).toMatchObject({ type: 'answer', seq: 1 });
+    expect(msgs[2]).toMatchObject({ type: 'transcript', speaker: 'Them', seq: 2 });
+    ws.close();
+  });
+
+  it('replays the backlog to a phone that connects later (so answers sent while away are not lost)', async () => {
+    server = new CompanionServer();
+    const s = await server.start(HOST);
+    server.push({ type: 'answer', title: 'AI answer', question: 'q1', text: 'sent while no phone was connected', at: new Date().toISOString() });
+    server.push({ type: 'transcript', text: 'line one', at: new Date().toISOString() });
+    const { ws, msgs } = await collect(s.port, tokenOf(s.url));
+    await vi.waitFor(() => expect(msgs.length).toBe(3));
+    expect(msgs.map((m) => m.type)).toEqual(['hello', 'answer', 'transcript']);
+    expect(msgs[1]).toMatchObject({ text: 'sent while no phone was connected', seq: 1 });
+    ws.close();
+  });
+
+  it('records a phone-reported device name (sanitised); ignores any other message', async () => {
+    const changes: number[] = [];
+    server = new CompanionServer((n) => changes.push(n));
+    const s = await server.start(HOST);
+    const { ws } = await collect(s.port, tokenOf(s.url));
+    await vi.waitFor(() => expect(server!.devices()).toEqual(['Phone']));
+    ws.send(JSON.stringify({ type: 'name', name: 'Pixel\u0007 8' }));
+    await vi.waitFor(() => expect(server!.devices()).toEqual(['Pixel 8']));
+    ws.send(JSON.stringify({ type: 'exec', cmd: 'rm -rf /' })); // not a thing — ignored
+    ws.send('not json');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(server.devices()).toEqual(['Pixel 8']);
+    ws.close();
+    await vi.waitFor(() => expect(server!.devices()).toEqual([]));
+  });
+
+  it('accepts the page from its alternate (.local) origin, rejects any other origin', async () => {
+    server = new CompanionServer();
+    const s = await server.start(HOST, 0, { altHost: 'inviterminal.local' });
+    const t = tokenOf(s.url);
+    const ok = await collect(s.port, t, { origin: `https://inviterminal.local:${s.port}` });
+    ok.ws.close();
+    await expect(collect(s.port, t, { origin: 'https://evil.example' })).rejects.toThrow(/403/);
+  });
+
+  it('reuses a remembered identity: same fingerprint and the same token still pairs', async () => {
+    server = new CompanionServer();
+    const first = await server.start(HOST);
+    await server.stop();
+    const identity: Identity = { key: '', cert: '', fingerprint256: '', token: tokenOf(first.url) };
+    // Generate a real key/cert, then serve it twice to show the fingerprint is stable.
+    const cert = await generateCert(HOST, 'inviterminal.local');
+    Object.assign(identity, cert);
+    server = new CompanionServer();
+    const a = await server.start(HOST, 0, { identity });
+    await server.stop();
+    server = new CompanionServer();
+    const b = await server.start(HOST, 0, { identity });
+    expect(b.fingerprint256).toBe(a.fingerprint256);
+    expect(tokenOf(b.url)).toBe(identity.token);
+    const { ws } = await collect(b.port, identity.token);
+    ws.close();
+  });
+
+  it('cleanDeviceName strips control characters, trims, caps length, rejects non-strings', () => {
+    expect(cleanDeviceName('  My\u0000 Phone  ')).toBe('My Phone');
+    expect(cleanDeviceName('x'.repeat(100))).toHaveLength(40);
+    expect(cleanDeviceName(42)).toBeNull();
+    expect(cleanDeviceName('   ')).toBeNull();
+  });
+});
+
+describe('PairingStore', () => {
+  it('saves with mode 0600, loads it back, treats a corrupt file as unpaired, and clears', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'invi-pair-'));
+    const store = new PairingStore(dir);
+    expect(await store.load()).toBeNull();
+    const p = { host: '192.168.1.6', key: 'K', cert: 'C', fingerprint256: 'AA:BB', token: 'T'.repeat(43) };
+    await store.save(p);
+    expect(await store.load()).toEqual(p);
+    expect((await stat(join(dir, 'companion-pairing.json'))).mode & 0o777).toBe(0o600);
+    await writeFile(join(dir, 'companion-pairing.json'), '{not json');
+    expect(await store.load()).toBeNull();
+    await store.clear();
+    expect(await store.load()).toBeNull();
+    await rm(dir, { recursive: true, force: true });
   });
 });

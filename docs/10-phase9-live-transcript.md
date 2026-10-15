@@ -66,7 +66,7 @@ See [[tinydiarize-detection-weak]].
   area.
 - **Length**: Short / Medium / Detailed (remembered per viewer) → `answerParams()` sets the
   instruction and caps `max_tokens` (160 / 450 / 1024) so cost stays bounded.
-- **Guards**: one answer in flight (a new ask cancels the previous); the line is
+- **Guards**: one answer in flight (Phase 10: later asks queue instead of cancelling — see doc 11); the line is
   **secret-masked in main** (`redactSecrets`) before it leaves the machine — same as Explain;
   disabled without a key. See [[ask-ai-on-transcript-manual-not-auto]].
 

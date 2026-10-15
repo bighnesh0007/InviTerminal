@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseTranscript, parseTurnsFromJson, WhisperStt, type SttPaths } from '../src/main/audio/WhisperStt';
+import { parseChannelSegments, parseTranscript, parseTurnsFromJson, WhisperStt, type SttPaths } from '../src/main/audio/WhisperStt';
 import { encodeWav } from '../src/shared/wav';
 
 const MODEL = process.env.INVI_WHISPER_MODEL ?? join(homedir(), '.config/inviterminal/models/ggml-base.en.bin');
@@ -23,6 +23,25 @@ describe('parseTranscript', () => {
   });
   it('strips tinydiarize [SPEAKER_TURN] markers from the plain text', () => {
     expect(parseTranscript('Hello there [SPEAKER_TURN] how are you')).toBe('Hello there how are you');
+  });
+});
+
+describe('parseChannelSegments (whisper -di on stereo input)', () => {
+  // Shape copied from a real `whisper-cli -di -oj` run on a two-channel recording (2026-10-15).
+  const real = [
+    { text: ' Salting firm is one of the few that gives you exposure to C-suite executives', speaker: '0' },
+    { text: ' type projects early on in your career.', speaker: '0' },
+    { text: ' And then the second reason is the opportunity to do externships.', speaker: '1' },
+    { text: ' So as I mentioned,', speaker: '1' },
+  ];
+  it('groups consecutive segments by channel', () => {
+    expect(parseChannelSegments(real)).toEqual([
+      { text: 'Salting firm is one of the few that gives you exposure to C-suite executives type projects early on in your career.', speaker: '0' },
+      { text: 'And then the second reason is the opportunity to do externships. So as I mentioned,', speaker: '1' },
+    ]);
+  });
+  it('maps anything but 0/1 (whisper prints "?" when unclear) to "?" and drops empty text', () => {
+    expect(parseChannelSegments([{ text: ' hm ', speaker: '?' }, { text: '  ', speaker: '0' }, { text: 'x' }])).toEqual([{ text: 'hm x', speaker: '?' }]);
   });
 });
 

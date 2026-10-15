@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { APP_ACTIONS, chordProblem, keymapProblems, type Keymap } from '../../shared/keymap';
 import { DEFAULT_SETTINGS } from '../../shared/settings';
 import { AI_MODELS } from '../../shared/ai';
+import { SPEAKER_MODES } from '../../shared/audio';
 import { isValidGlobalAccelerator } from '../visibility/accelerator';
 
 const Chord = z.string().max(40).superRefine((s, ctx) => {
@@ -67,6 +68,10 @@ export const SettingsSchema = z
           .max(65535)
           .refine((p) => p === 0 || p >= 1024, 'use 0 (random) or a port between 1024 and 65535')
           .default(d.companion.port),
+        rememberPairing: z.boolean().default(d.companion.rememberPairing),
+        autoStart: z.boolean().default(d.companion.autoStart),
+        sendTranscript: z.boolean().default(d.companion.sendTranscript),
+        mdns: z.boolean().default(d.companion.mdns),
       })
       .strict()
       .prefault({}),
@@ -75,6 +80,7 @@ export const SettingsSchema = z
         source: z.string().max(256).nullable().default(d.liveTranscript.source),
         chunkSeconds: z.number().int().min(3).max(30).default(d.liveTranscript.chunkSeconds),
         tdrzModelPath: z.string().max(4096).nullable().default(d.liveTranscript.tdrzModelPath),
+        speakerMode: z.enum(SPEAKER_MODES).catch(d.liveTranscript.speakerMode).default(d.liveTranscript.speakerMode),
       })
       .strict()
       .prefault({}),
@@ -91,7 +97,7 @@ export const SettingsPatchSchema = z
     ai: z.object({ model: z.enum(AI_MODELS) }).partial().strict().optional(),
     stt: z.object({ modelPath: z.string().max(4096).nullable(), binaryPath: z.string().max(4096).nullable() }).partial().strict().optional(),
     tts: z.object({ binaryPath: z.string().max(4096).nullable(), voice: z.string().max(64).nullable() }).partial().strict().optional(),
-    companion: z.object({ port: z.number().int().min(0).max(65535).refine((p) => p === 0 || p >= 1024, 'use 0 (random) or a port between 1024 and 65535') }).partial().strict().optional(),
-    liveTranscript: z.object({ source: z.string().max(256).nullable(), chunkSeconds: z.number().int().min(3).max(30), tdrzModelPath: z.string().max(4096).nullable() }).partial().strict().optional(),
+    companion: z.object({ port: z.number().int().min(0).max(65535).refine((p) => p === 0 || p >= 1024, 'use 0 (random) or a port between 1024 and 65535'), rememberPairing: z.boolean(), autoStart: z.boolean(), sendTranscript: z.boolean(), mdns: z.boolean() }).partial().strict().optional(),
+    liveTranscript: z.object({ source: z.string().max(256).nullable(), chunkSeconds: z.number().int().min(3).max(30), tdrzModelPath: z.string().max(4096).nullable(), speakerMode: z.enum(SPEAKER_MODES) }).partial().strict().optional(),
   })
   .strict();

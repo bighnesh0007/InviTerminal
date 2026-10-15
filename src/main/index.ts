@@ -29,13 +29,14 @@ import { WhisperStt } from './audio/WhisperStt';
 import { registerSttIpc } from './audio/stt-register';
 import { type RunTts, TtsSpeaker } from './audio/TtsSpeaker';
 import { registerTtsIpc } from './audio/tts-register';
-import { type CaptureProcess, defaultMonitorSource, LiveTranscriptController, parecordCapture, type StartCapture } from './audio/LiveTranscriptController';
+import { type CaptureProcess, defaultMicSource, defaultMonitorSource, LiveTranscriptController, parecordCapture, type StartCapture, type Transcriber } from './audio/LiveTranscriptController';
 import { registerLiveIpc } from './audio/live-register';
 import { GroqClient } from './ai/GroqClient';
 import { KeyStore } from './ai/key-store';
 import { registerAiIpc } from './ai/register';
 import { type ExplainStreamer, registerExplainIpc } from './ai/explain';
 import { CompanionController } from './companion/controller';
+import { PairingStore } from './companion/pairing-store';
 import { type ChatStreamer, registerPracticeIpc } from './ai/practice';
 import { type AnswerStreamer, registerLiveAnswerIpc } from './ai/live-answer';
 import { LibraryService } from './library/LibraryService';
@@ -213,22 +214,38 @@ app.whenReady().then(async () => {
       if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send(IPC.companionStatusChanged, st);
       visibility.setSharing(st.running, st.clients, () => void companion.stop());
     },
-    // Autotests use a random free port so they never collide with a real session's fixed port.
-    () => (autotest !== 'off' ? 0 : settings.effective().companion.port),
+    {
+      // Autotests use a random free port and never persist a pairing, so they can't touch a real one.
+      getPort: () => (autotest !== 'off' ? 0 : settings.effective().companion.port),
+      getRemember: () => settings.effective().companion.rememberPairing,
+      getMdns: () => autotest === 'off' && settings.effective().companion.mdns,
+      store: autotest !== 'off' ? null : new PairingStore(app.getPath('userData')),
+    },
   );
   ipcMain.handle(IPC.companionStatus, guard(() => companion.status()));
   ipcMain.handle(IPC.companionStart, guard(() => companion.start()));
   ipcMain.handle(IPC.companionStop, guard(() => companion.stop()));
+  ipcMain.handle(IPC.companionForget, guard(() => companion.forget()));
   app.on('before-quit', () => void companion.stop());
+  /** "Auto-start Share": bring the phone link up when you start Live or Ask (a paired phone reconnects itself). */
+  const autoShare = () => {
+    if (settings.effective().companion.autoStart && !companion.isRunning) void companion.start().catch(() => undefined);
+  };
 
   const explainStreamer: ExplainStreamer = autotest !== 'off' ? stubExplainStreamer : (opts, onDelta, signal) => groq.explainStream(opts, onDelta, signal);
   registerExplainIpc(() => mainWin, explainStreamer, () => settings.effective().ai.model, (text) => companion.push({ type: 'explanation', title: 'Terminal explanation', text, at: new Date().toISOString() }));
   const chatStreamer: ChatStreamer = autotest !== 'off' ? stubChatStreamer : (opts, onDelta, signal) => groq.chatStream(opts, onDelta, signal);
   registerPracticeIpc(() => mainWin, chatStreamer, () => settings.effective().ai.model);
   const answerStreamer: AnswerStreamer = autotest !== 'off' ? stubAnswerStreamer : (opts, onDelta, signal) => groq.answerStream(opts, onDelta, signal);
-  registerLiveAnswerIpc(() => mainWin, answerStreamer, () => settings.effective().ai.model, (question, answer) => {
-    const q = question.length > 200 ? `${question.slice(0, 200)}…` : question;
-    companion.push({ type: 'explanation', title: 'AI answer', text: `Q: ${q}\n\n${answer}`, at: new Date().toISOString() });
+  registerLiveAnswerIpc(() => mainWin, answerStreamer, () => settings.effective().ai.model, (question, answer, mode) => {
+    const q = question.length > 600 ? `${question.slice(0, 600)}…` : question;
+    // With auto-start on, bring sharing up first; the answer then lands in the server's backlog, which a
+    // paired phone receives as soon as it (re)connects. With auto-start off, push only if already sharing.
+    const ready = settings.effective().companion.autoStart && !companion.isRunning ? companion.start().catch(() => undefined) : Promise.resolve();
+    void ready.then(() => {
+      if (!companion.isRunning) return;
+      companion.push({ type: 'answer', title: mode === 'summarize' ? 'Summary' : 'AI answer', question: mode === 'summarize' ? 'Conversation so far' : q, text: answer, at: new Date().toISOString() });
+    });
   });
 
   // Settings: applied live where possible; startup-only values are flagged as needing a restart.
@@ -300,25 +317,29 @@ app.whenReady().then(async () => {
   };
   const liveScript = ['Tell me about yourself.', 'What is your biggest strength?', 'Describe a hard bug you fixed.'];
   let liveIdx = 0;
-  const fakeTranscriber = {
+  const fakeTranscriber: Transcriber = {
     status: () => ({ available: true, binary: 'fake', binaryFound: true, model: 'fake', modelFound: true, reason: null }),
     diarizeStatus: () => ({ available: true, model: 'fake-tdrz', reason: null }),
-    transcribe: async (_wav: string, o?: { diarize?: boolean }) => {
+    transcribe: async (_wav, o) => {
       const text = liveScript[liveIdx++ % liveScript.length]!;
-      // When diarizing, pretend the chunk had two speaker turns.
+      // Pretend the chunk held two speakers: turns for tdrz, channel 0/1 for stereo (-di).
+      if (o?.stereo) return { text, ms: 5, channels: [{ text, speaker: '1' as const }, { text: 'Sure — let me walk you through it.', speaker: '0' as const }] };
       return o?.diarize ? { text, ms: 5, turns: [text, 'And how did you test it?'] } : { text, ms: 5 };
     },
   };
-  const fakeLiveCapture: StartCapture = (): CaptureProcess => {
+  const fakeLiveCapture: StartCapture = (_source, channels): CaptureProcess => {
     let dataCb: ((b: Uint8Array) => void) | null = null;
     let emitted = 0;
-    const chunkBytes = settings.effective().liveTranscript.chunkSeconds * 16_000 * 2;
+    const chunkBytes = settings.effective().liveTranscript.chunkSeconds * 16_000 * 2 * channels;
+    // Small buffers on a short tick, like a real recorder (the You/Them mixer relies on that pacing).
+    const piece = 8000;
+    const total = chunkBytes * liveScript.length;
     const timer = setInterval(() => {
-      if (dataCb && emitted < liveScript.length) {
-        dataCb(new Uint8Array(chunkBytes));
-        emitted++;
+      if (dataCb && emitted < total) {
+        dataCb(new Uint8Array(piece));
+        emitted += piece;
       }
-    }, 120);
+    }, 15);
     return { onData: (cb) => (dataCb = cb), onError: () => undefined, onClose: () => undefined, kill: () => clearInterval(timer) };
   };
   const live = new LiveTranscriptController(
@@ -327,13 +348,19 @@ app.whenReady().then(async () => {
     () => settings.effective().liveTranscript.source ?? defaultMonitorSource(),
     () => settings.effective().liveTranscript.chunkSeconds,
     {
-      line: (l) => sendLive(IPC.liveLine, l),
+      line: (l) => {
+        sendLive(IPC.liveLine, l);
+        if (settings.effective().companion.sendTranscript) companion.push({ type: 'transcript', text: l.text, ...(l.speaker ? { speaker: l.speaker } : {}), at: l.at });
+      },
       state: (s) => {
         sendLive(IPC.liveStatusChanged, s);
         visibility.setLive(s.active, () => void live.stop());
+        if (s.active && !s.paused) autoShare();
       },
       error: (m) => sendLive(IPC.liveError, m),
     },
+    // You/Them needs a microphone; autotests pretend one exists.
+    () => (autotest !== 'off' ? 'fake-mic' : defaultMicSource()),
   );
   registerLiveIpc(() => mainWin, live);
   app.on('before-quit', () => void live.stop());
@@ -474,7 +501,8 @@ const stubChatStreamer: ChatStreamer = async (opts, onDelta, signal) => {
 
 /** Deterministic fake answer for autotests: echoes the line and the requested length. */
 const stubAnswerStreamer: AnswerStreamer = async (opts, onDelta, signal) => {
-  const parts = [`[stub ${opts.length}] `, 'Answer to: ', opts.text.slice(0, 40)];
+  const tag = `${opts.length}${opts.mode === 'summarize' ? ' summary' : ''}${opts.history.length ? ` followup${opts.history.length / 2}` : ''}`;
+  const parts = [`[stub ${tag}] `, 'Answer to: ', opts.text.slice(0, 40)];
   let full = '';
   for (const p of parts) {
     if (signal.aborted) throw new Error('aborted');

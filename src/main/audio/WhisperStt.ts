@@ -22,6 +22,13 @@ export interface Transcript {
   ms: number;
   /** Speaker-turn segments (only when diarize was requested and the tdrz model is present). */
   turns?: string[];
+  /** Channel-diarized segments (stereo input with -di): speaker "0" = left, "1" = right, "?" = unclear. */
+  channels?: ChannelSegment[];
+}
+
+export interface ChannelSegment {
+  text: string;
+  speaker: '0' | '1' | '?';
 }
 
 export interface DiarizeStatus {
@@ -58,10 +65,28 @@ export function parseTranscript(stdout: string): string {
     .trim();
 }
 
-/** A segment of whisper's JSON output; tinydiarize sets speaker_turn_next when a speaker change follows. */
+/** A segment of whisper's JSON output; tinydiarize sets speaker_turn_next, -di sets speaker. */
 export interface WhisperJsonSegment {
   text: string;
   speaker_turn_next?: boolean;
+  speaker?: string;
+}
+
+/**
+ * From whisper's -di JSON (stereo input), group consecutive segments by channel speaker.
+ * whisper compares channel energy per segment: "0" = left louder, "1" = right, "?" = unclear.
+ */
+export function parseChannelSegments(segments: WhisperJsonSegment[]): ChannelSegment[] {
+  const out: ChannelSegment[] = [];
+  for (const seg of segments) {
+    const text = (seg.text ?? '').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    const speaker: ChannelSegment['speaker'] = seg.speaker === '0' || seg.speaker === '1' ? seg.speaker : '?';
+    const last = out[out.length - 1];
+    if (last && last.speaker === speaker) last.text = `${last.text} ${text}`;
+    else out.push({ text, speaker });
+  }
+  return out;
 }
 
 /**
@@ -129,8 +154,24 @@ export class WhisperStt {
     return { available: binaryFound && modelFound, binary, binaryFound, model, modelFound, reason };
   }
 
-  async transcribe(wavPath: string, opts: { language?: string; threads?: number; timeoutMs?: number; diarize?: boolean } = {}): Promise<Transcript> {
+  async transcribe(wavPath: string, opts: { language?: string; threads?: number; timeoutMs?: number; diarize?: boolean; stereo?: boolean } = {}): Promise<Transcript> {
     const { binary } = this.resolved();
+    if (opts.stereo === true) {
+      // Stereo input: whisper's channel diarization labels each segment by the louder channel.
+      const s = this.status();
+      if (!s.available) throw new Error(s.reason ?? 'Speech-to-text is not available.');
+      const base = wavPath.replace(/\.wav$/i, '');
+      const jsonPath = `${base}.json`;
+      const t0 = Date.now();
+      await this.run(binary, ['-m', s.model, '-f', wavPath, '-np', '-l', opts.language ?? 'en', '-t', String(opts.threads ?? 4), '-di', '-oj', '-of', base], opts.timeoutMs ?? 120_000);
+      try {
+        const parsed = JSON.parse(await readFile(jsonPath, 'utf8')) as { transcription?: WhisperJsonSegment[] };
+        const channels = parseChannelSegments(parsed.transcription ?? []);
+        return { text: channels.map((c) => c.text).join(' '), ms: Date.now() - t0, channels };
+      } finally {
+        await rm(jsonPath, { force: true });
+      }
+    }
     // Diarize with the tdrz model when asked and available; otherwise fall back to normal STT.
     const tdrz = opts.diarize === true && this.diarizeStatus().available;
     let model: string;

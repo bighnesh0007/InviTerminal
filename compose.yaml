@@ -1,0 +1,54 @@
+# InviTerminal's dependencies in Docker — for machines without MongoDB or whisper.cpp.
+#
+# The app itself still runs on your desktop (npm start / the AppImage): its core features act on
+# your desktop session (hiding its window from screen shares via KDE, recording your speakers/mic,
+# opening YOUR shell), which a container would cut off. These services fill in what's missing.
+#
+#   ./scripts/docker-setup.sh          one command: start MongoDB, download the speech model(s)
+#
+# Or by hand:
+#   docker compose up -d mongo                         MongoDB for the snippet library (localhost only)
+#   docker compose run --rm models                     download the whisper speech model (~148 MB)
+#   INVI_TDRZ=1 docker compose run --rm models         …plus the speaker-turn model (~465 MB)
+#   then point Settings → Speech-to-text → binary at docker/whisper-cli (it runs whisper in Docker)
+
+name: inviterminal
+
+services:
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    # Bound to 127.0.0.1 only: the library holds your snippets and must never be reachable from the LAN.
+    # If you already run MongoDB on 27017, set INVI_MONGO_PORT (and the same port in Settings → Library).
+    ports:
+      - "127.0.0.1:${INVI_MONGO_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # One-shot: downloads the whisper model(s) into the app's model folder on the host.
+  models:
+    image: curlimages/curl:8.11.1
+    profiles: ["setup"]
+    user: "${INVI_UID:-1000}:${INVI_GID:-1000}"
+    environment:
+      INVI_TDRZ: "${INVI_TDRZ:-0}"
+    volumes:
+      - "${INVI_MODELS_DIR:-${HOME}/.config/inviterminal/models}:/models"
+      - ./docker/fetch-models.sh:/fetch-models.sh:ro
+    entrypoint: ["sh", "/fetch-models.sh"]
+    network_mode: bridge
+
+  # Not a long-running service: docker/whisper-cli runs this image per transcription
+  # (`docker run --rm --network none …`). Listed here so `docker compose pull` fetches it.
+  whisper:
+    image: ghcr.io/ggml-org/whisper.cpp:main
+    profiles: ["tools"]
+    network_mode: none
+
+volumes:
+  mongo-data:

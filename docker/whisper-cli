@@ -1,0 +1,32 @@
+#!/bin/sh
+# Drop-in replacement for a host `whisper-cli`: runs whisper.cpp's CLI from the official container.
+# Use it when whisper.cpp isn't installed on this machine:
+#   Settings → Speech-to-text → whisper binary = /path/to/InviTerminal/docker/whisper-cli
+#   (or INVI_WHISPER_BIN=/path/to/InviTerminal/docker/whisper-cli for one run)
+#
+# Privacy: the container gets --network none (audio can't leave the machine), runs as you, and sees
+# only the folders of the files it is given — the model (read-only) and the temp audio/output folder.
+set -eu
+
+IMAGE="${INVI_WHISPER_IMAGE:-ghcr.io/ggml-org/whisper.cpp:main}"
+
+# Mount the directory of every file argument at the same path, so whisper's absolute paths still work.
+mounts=""
+add_mount() { # dir mode
+  case " $mounts " in *" $1:$1:"*) return ;; esac
+  mounts="$mounts $1:$1:$2"
+}
+prev=""
+for arg in "$@"; do
+  case "$prev" in
+    -m | --model) add_mount "$(dirname "$arg")" ro ;;
+    -f | --file) add_mount "$(dirname "$arg")" rw ;;
+    -of | --output-file) add_mount "$(dirname "$arg")" rw ;;
+  esac
+  prev=$arg
+done
+
+# docker run [options] IMAGE [whisper args]: build options in front of the image and its arguments.
+set -- --rm --network none --user "$(id -u):$(id -g)" --entrypoint whisper-cli "$IMAGE" "$@"
+for m in $mounts; do set -- -v "$m" "$@"; done
+exec docker run "$@"

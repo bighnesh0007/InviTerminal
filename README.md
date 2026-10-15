@@ -124,6 +124,24 @@ them for a single run, mostly for development:
 
 ## Install
 
+**No MongoDB or whisper.cpp on your machine?** Run the dependencies in Docker (the app itself stays
+on your desktop — it needs your KDE session, audio and shell). See [docs/12-docker.md](docs/12-docker.md):
+
+```bash
+./scripts/docker-setup.sh
+```
+
+That starts MongoDB (localhost only), downloads the speech model, and tells you which Settings to use
+(whisper runs through `docker/whisper-cli` if it isn't installed). The build container makes the
+AppImage without Node or a compiler on the host:
+
+```bash
+docker build -f docker/build.Dockerfile --target out -o release .
+```
+
+_These Docker files are statically checked but have not been run end to end yet — see the checklist
+in the doc._
+
 **Arch Linux** (runs on Arch's `electron44`):
 
 ```bash

@@ -8,7 +8,7 @@ mainstream screen shares and recordings on supported desktops. It does nothing
 about cameras, remote desktop, compromised machines, accessibility APIs or the
 clipboard. See [docs/01-feasibility-and-architecture.md](docs/01-feasibility-and-architecture.md) §2.5.
 
-## Status — Phase 7 (AI features on Groq)
+## Status — Phase 9 (live transcript + Ask-AI, on Groq)
 
 | Platform | Status |
 |---|---|
@@ -26,7 +26,9 @@ The **snippet library** (Ctrl+Shift+L) stores snippets in MongoDB (its own `invi
 database on the local server; never remote unless you allow it). **Insert** pastes without a
 newline, so nothing runs until you press Enter.
 
-**AI features** (optional, need a free [Groq](https://console.groq.com) key in Settings):
+**AI features** (optional, need a free [Groq](https://console.groq.com) key — set it in Settings,
+or put `GROQ_API_KEY=…` in a `.env` at the repo root; see [.env.example](.env.example)). The default
+model is the cheapest/fastest (`openai/gpt-oss-20b`):
 - **Explain output** (Ctrl+Shift+E) — selected terminal text → Groq, streamed into a side
   panel, behind a confirm-preview that masks obvious secrets. Nothing is sent until you confirm.
 - **Microphone + local transcription** — off by default, a red REC badge + tray indicator
@@ -37,14 +39,22 @@ newline, so nothing runs until you press Enter.
   machine.
 - **Share to phone** (Share button) — opens a one-time, TLS-encrypted link on your LAN; scan
   the QR with your phone (same WiFi) and terminal explanations are pushed to its browser.
-  Off by default, LAN-only (never the internet), with a persistent "📱 Sharing" indicator.
+  Off by default, LAN-only (never the internet), with a persistent "📱 Sharing" indicator. The
+  port is fixed (Settings → Share to phone) so one firewall rule keeps working.
+- **Live transcript** (Live button) — transcribes the meeting/call audio playing on this machine
+  **locally** (whisper.cpp), behind a **consent gate** + a visible "● Live" indicator. Optional
+  **speaker-turn labels** (whisper tinydiarize — download the tdrz model; detection is best-effort).
+  Each line (or a set of ticked turns) has an **✨ Ask** that sends it to Groq at a chosen length
+  (Short / Medium / Detailed), masked for secrets first. Manual and visible — not an automatic feed.
 
 Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 [Phase 3](docs/04-phase3-visibility-results.md) ·
 [Phase 4](docs/05-phase4-library-results.md) ·
 [Phase 5](docs/06-phase5-settings-tabs-results.md) ·
 [Phase 6](docs/07-phase6-packaging-results.md) ·
-[Phase 7](docs/08-phase7-ai-features-plan.md).
+[Phase 7](docs/08-phase7-ai-features-plan.md) ·
+[Phase 8](docs/09-phase8-companion-plan.md) ·
+[Phase 9](docs/10-phase9-live-transcript.md).
 
 ### Verified vs. not
 

@@ -1,4 +1,5 @@
 import type { LiveLine, LiveTranscriptStatus } from '../shared/audio';
+import { ANSWER_LENGTHS, ANSWER_LENGTH_LABELS, type AnswerLength, type AiStatus } from '../shared/ai';
 import type { RendererApi } from '../shared/ipc';
 import { button, el } from './dom';
 
@@ -31,6 +32,31 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   let sttReady = false;
   let active = false;
   let diarizeAvailable = false;
+  let aiReady = false;
+
+  // ---- Ask AI: length selector + per-line streaming answers --------------------------------
+  let askLength: AnswerLength = readStoredLength();
+  let nextId = 1;
+  const asks = new Map<number, { answer: HTMLElement; btn: HTMLButtonElement; started: boolean; busy: boolean }>();
+
+  const lengthButtons = ANSWER_LENGTHS.map((len) => {
+    const b = button(ANSWER_LENGTH_LABELS[len], () => {
+      askLength = len;
+      try {
+        localStorage.setItem('invi.askLength', len);
+      } catch {
+        /* private mode */
+      }
+      refreshLength();
+    });
+    b.dataset.len = len;
+    return b;
+  });
+  const lengthRow = el('div', { className: 'live-length' }, el('span', { className: 'field-note', text: 'Answer length:' }), ...lengthButtons);
+  function refreshLength(): void {
+    for (const b of lengthButtons) b.classList.toggle('active', b.dataset.len === askLength);
+  }
+  refreshLength();
 
   const consent = Object.assign(el('input'), { type: 'checkbox' });
   const consentLabel = el('label', { className: 'live-consent' }, consent, el('span', { text: 'Everyone in the call has been told it is being transcribed on my machine.' }));
@@ -53,11 +79,37 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   }
 
   function line(l: LiveLine): void {
+    const id = nextId++;
     const parts = [el('span', { className: 'live-time', text: new Date(l.at).toLocaleTimeString() })];
     if (l.speaker) parts.push(el('span', { className: 'live-speaker', text: l.speaker }));
     parts.push(el('span', { className: 'live-text', text: l.text }));
-    feed.append(el('div', { className: 'live-line' }, ...parts));
+    const askBtn = button('✨ Ask', () => ask(id, l.text));
+    askBtn.className = 'live-ask';
+    askBtn.disabled = !aiReady;
+    askBtn.title = aiReady ? 'Ask the AI about this line' : `Add a ${'Groq'} key in Settings to use Ask`;
+    parts.push(askBtn);
+    const answer = el('div', { className: 'live-answer' });
+    answer.hidden = true;
+    feed.append(el('div', { className: 'live-item' }, el('div', { className: 'live-line' }, ...parts), answer));
+    asks.set(id, { answer, btn: askBtn, started: false, busy: false });
     feed.scrollTop = feed.scrollHeight;
+  }
+
+  async function ask(id: number, text: string): Promise<void> {
+    const entry = asks.get(id);
+    if (!entry || entry.busy) return;
+    entry.busy = true;
+    entry.started = false;
+    entry.btn.disabled = true;
+    entry.answer.hidden = false;
+    entry.answer.textContent = '…';
+    try {
+      await api.live.ask(id, text, askLength);
+    } catch (e) {
+      entry.answer.textContent = `Error: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`;
+      entry.busy = false;
+      entry.btn.disabled = !aiReady;
+    }
   }
 
   function render(s: LiveTranscriptStatus): void {
@@ -75,6 +127,7 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   async function start(): Promise<void> {
     say('');
     feed.replaceChildren();
+    asks.clear();
     try {
       render(await api.live.start(consent.checked, diarize.checked));
       say('Transcribing. Play the call through your speakers; text appears below.');
@@ -91,10 +144,40 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   api.live.onStatus(render);
   api.live.onLine(line);
   api.live.onError((m) => say(`Error: ${m.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`));
+  api.live.onAnswerDelta(({ id, chunk }) => {
+    const entry = asks.get(id);
+    if (!entry) return;
+    if (!entry.started) {
+      entry.answer.textContent = '';
+      entry.started = true;
+    }
+    entry.answer.textContent += chunk;
+    feed.scrollTop = feed.scrollHeight;
+  });
+  api.live.onAnswerDone(({ id }) => {
+    const entry = asks.get(id);
+    if (!entry) return;
+    entry.busy = false;
+    entry.btn.disabled = !aiReady;
+  });
+  api.live.onAnswerError(({ id, message }) => {
+    const entry = asks.get(id);
+    if (!entry) return;
+    entry.answer.textContent = `Error: ${message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`;
+    entry.busy = false;
+    entry.btn.disabled = !aiReady;
+  });
   void api.live.status().then((s) => {
     sttReady = !s.reason;
     render(s);
   });
+
+  const renderAi = (s: AiStatus) => {
+    aiReady = s.key.present;
+    for (const e of asks.values()) e.btn.disabled = e.busy || !aiReady;
+  };
+  void api.ai.status().then(renderAi);
+  api.ai.onStatus(renderAi);
 
   panel.append(
     el('div', { className: 'lib-head' }, el('strong', { text: 'Live transcript' }), button('Close', () => close())),
@@ -103,10 +186,21 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     consentLabel,
     diarizeLabel,
     el('div', { className: 'lib-actions' }, startBtn, stopBtn),
+    lengthRow,
     feed,
     message,
   );
   setControls();
+
+  function readStoredLength(): AnswerLength {
+    try {
+      const v = localStorage.getItem('invi.askLength');
+      if (v && (ANSWER_LENGTHS as readonly string[]).includes(v)) return v as AnswerLength;
+    } catch {
+      /* private mode */
+    }
+    return 'short';
+  }
 
   function close(): void {
     if (panel.hidden) return;

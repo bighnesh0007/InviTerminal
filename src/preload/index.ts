@@ -130,6 +130,17 @@ const api: RendererApi = {
     onError: (cb) => {
       ipcRenderer.on(IPC.liveError, (_e, m: string) => cb(m));
     },
+    ask: (id, text, length) => ipcRenderer.invoke(IPC.liveAsk, { id, text, length }),
+    cancelAsk: () => ipcRenderer.send(IPC.liveAskCancel),
+    onAnswerDelta: (cb) => {
+      ipcRenderer.on(IPC.liveAnswerDelta, (_e, m) => cb(m));
+    },
+    onAnswerDone: (cb) => {
+      ipcRenderer.on(IPC.liveAnswerDone, (_e, m) => cb(m));
+    },
+    onAnswerError: (cb) => {
+      ipcRenderer.on(IPC.liveAnswerError, (_e, m) => cb(m));
+    },
   },
   companion: {
     status: () => ipcRenderer.invoke(IPC.companionStatus),

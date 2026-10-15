@@ -14,6 +14,36 @@ export const AI_MODEL_LABELS: Record<AiModel, string> = {
 /** The provider name, shown in UI text ("send to …", "key stored …"). */
 export const AI_PROVIDER = 'Groq';
 
+/** How long an "Ask AI" answer should be. */
+export const ANSWER_LENGTHS = ['short', 'medium', 'detailed'] as const;
+export type AnswerLength = (typeof ANSWER_LENGTHS)[number];
+export const ANSWER_LENGTH_LABELS: Record<AnswerLength, string> = {
+  short: 'Short',
+  medium: 'Medium',
+  detailed: 'Detailed',
+};
+
+/** The instruction + output cap for each answer length, so the response (and cost) stays bounded. */
+export function answerParams(length: AnswerLength): { instruction: string; maxTokens: number } {
+  switch (length) {
+    case 'short':
+      return { instruction: 'Answer in 1–2 crisp sentences. No preamble.', maxTokens: 160 };
+    case 'medium':
+      return { instruction: 'Answer in a short paragraph (3–5 sentences). No preamble.', maxTokens: 450 };
+    case 'detailed':
+      return { instruction: 'Answer thoroughly but without padding: the key points, briefly explained.', maxTokens: 1024 };
+  }
+}
+
+/** System prompt for answering a line pulled from a live conversation transcript. */
+export function answerSystem(length: AnswerLength): string {
+  return (
+    'You are a concise assistant. The user gives you a line from a live conversation — usually a question or a prompt. ' +
+    'Respond directly and helpfully, as if helping the user think it through. ' +
+    answerParams(length).instruction
+  );
+}
+
 export type KeySource = 'env' | 'keychain' | 'none';
 
 export interface KeyStatus {

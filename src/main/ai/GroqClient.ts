@@ -1,5 +1,5 @@
 import type Groq from 'groq-sdk';
-import { type AiModel, AI_MODELS } from '../../shared/ai';
+import { type AiModel, AI_MODELS, type AnswerLength, answerParams, answerSystem } from '../../shared/ai';
 
 /**
  * Thin wrapper over groq-sdk (console.groq.com — free, fast inference on open
@@ -67,9 +67,23 @@ export class GroqClient {
     return this.run(opts.model, [{ role: 'system', content: opts.system }, ...opts.messages], onDelta, signal);
   }
 
-  private async run(model: AiModel, messages: Groq.Chat.Completions.ChatCompletionMessageParam[], onDelta: (chunk: string) => void, signal?: AbortSignal): Promise<string> {
+  /** Answer a single line (from the live transcript) at the requested length. */
+  async answerStream(opts: { model: AiModel; text: string; length: AnswerLength }, onDelta: (chunk: string) => void, signal?: AbortSignal): Promise<string> {
+    return this.run(
+      opts.model,
+      [
+        { role: 'system', content: answerSystem(opts.length) },
+        { role: 'user', content: opts.text },
+      ],
+      onDelta,
+      signal,
+      answerParams(opts.length).maxTokens,
+    );
+  }
+
+  private async run(model: AiModel, messages: Groq.Chat.Completions.ChatCompletionMessageParam[], onDelta: (chunk: string) => void, signal?: AbortSignal, maxTokens = 4096): Promise<string> {
     const client = await this.client();
-    const stream = await client.chat.completions.create({ model, messages, max_tokens: 4096, stream: true }, signal ? { signal } : undefined);
+    const stream = await client.chat.completions.create({ model, messages, max_tokens: maxTokens, stream: true }, signal ? { signal } : undefined);
     let full = '';
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta?.content;

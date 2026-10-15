@@ -146,4 +146,13 @@ textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; 
 .live-line { display: flex; gap: 8px; align-items: baseline; }
 .live-time { font-family: ui-monospace, monospace; font-size: 10px; color: var(--muted); flex: none; }
 .live-speaker { font-size: 10px; font-weight: 700; color: #7fd69d; text-transform: uppercase; flex: none; min-width: 64px; }
-.live-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.live-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; flex: 1; }
+.live-item { display: flex; flex-direction: column; gap: 2px; }
+.live-line { align-items: baseline; }
+.live-ask { flex: none; font-size: 11px; padding: 1px 8px; opacity: 0.55; }
+.live-item:hover .live-ask { opacity: 1; }
+.live-answer { margin: 2px 0 6px 72px; padding: 6px 10px; background: var(--bg); border-left: 2px solid #7f9dd6; border-radius: 4px; font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.live-answer[hidden] { display: none; }
+.live-length { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.live-length button { font-size: 12px; padding: 2px 10px; }
+.live-length button.active { background: #2e6f9d; color: #fff; border-color: #2e6f9d; }

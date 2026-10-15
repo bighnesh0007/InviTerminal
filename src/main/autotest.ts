@@ -886,6 +886,14 @@ export async function liveTranscriptAutotest(win: BrowserWindow, controller: Pro
     const speakers = await js<string[]>(`[...document.querySelectorAll('.live-feed .live-speaker')].map(e => e.textContent)`);
     log('transcribing', { gotLines, lineCount: seen.length, first: seen[0], speakers: speakers.slice(0, 3), badge: await js<string>(`document.querySelector('.live-badge').textContent`) });
 
+    // Ask AI about the first line (needs a key; the stub streamer answers deterministically).
+    await js(`window.inviterminal.ai.setKey('gsk_fakeLiveAskAutotest0123456789abc')`);
+    await waitFor(async () => !(await js<boolean>(`document.querySelector('.live-item .live-ask').disabled`)));
+    await js(`document.querySelector('.live-length button[data-len="short"]').click()`);
+    await js(`document.querySelector('.live-item .live-ask').click()`);
+    const gotAnswer = await waitFor(async () => /stub/.test(await js<string>(`document.querySelector('.live-item .live-answer').textContent || ''`)));
+    log('ask-ai', { gotAnswer, answer: (await js<string>(`document.querySelector('.live-item .live-answer').textContent`)).slice(0, 60) });
+
     // Behind the gate: removing protection conceals the panel.
     await controller.unprotect();
     await sleep(300);

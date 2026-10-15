@@ -37,6 +37,7 @@ import { registerAiIpc } from './ai/register';
 import { type ExplainStreamer, registerExplainIpc } from './ai/explain';
 import { CompanionController } from './companion/controller';
 import { type ChatStreamer, registerPracticeIpc } from './ai/practice';
+import { type AnswerStreamer, registerLiveAnswerIpc } from './ai/live-answer';
 import { LibraryService } from './library/LibraryService';
 import { registerLibraryIpc } from './library/register';
 import { isProductionBuild } from './build-mode';
@@ -224,6 +225,8 @@ app.whenReady().then(async () => {
   registerExplainIpc(() => mainWin, explainStreamer, () => settings.effective().ai.model, (text) => companion.push({ type: 'explanation', title: 'Terminal explanation', text, at: new Date().toISOString() }));
   const chatStreamer: ChatStreamer = autotest !== 'off' ? stubChatStreamer : (opts, onDelta, signal) => groq.chatStream(opts, onDelta, signal);
   registerPracticeIpc(() => mainWin, chatStreamer, () => settings.effective().ai.model);
+  const answerStreamer: AnswerStreamer = autotest !== 'off' ? stubAnswerStreamer : (opts, onDelta, signal) => groq.answerStream(opts, onDelta, signal);
+  registerLiveAnswerIpc(() => mainWin, answerStreamer, () => settings.effective().ai.model);
 
   // Settings: applied live where possible; startup-only values are flagged as needing a restart.
   settings.onChange((v) => {
@@ -462,6 +465,19 @@ const stubChatStreamer: ChatStreamer = async (opts, onDelta, signal) => {
     onDelta(p);
     full += p;
     await new Promise((r) => setTimeout(r, 25));
+  }
+  return full;
+};
+
+/** Deterministic fake answer for autotests: echoes the line and the requested length. */
+const stubAnswerStreamer: AnswerStreamer = async (opts, onDelta, signal) => {
+  const parts = [`[stub ${opts.length}] `, 'Answer to: ', opts.text.slice(0, 40)];
+  let full = '';
+  for (const p of parts) {
+    if (signal.aborted) throw new Error('aborted');
+    onDelta(p);
+    full += p;
+    await new Promise((r) => setTimeout(r, 20));
   }
   return full;
 };

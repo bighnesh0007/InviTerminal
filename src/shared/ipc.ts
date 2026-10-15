@@ -1,6 +1,6 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
-import type { AiStatus } from './ai';
+import type { AiStatus, AnswerLength } from './ai';
 import type { AudioKind, AudioStatus, LiveLine, LiveTranscriptStatus, SttStatus, TtsStatus } from './audio';
 import type { CompanionStatus } from './companion';
 import type { SettingsPatch, SettingsView } from './settings';
@@ -89,6 +89,14 @@ export const IPC = {
   liveLine: 'live:line',
   /** main → renderer */
   liveError: 'live:error',
+  liveAsk: 'live:ask',
+  liveAskCancel: 'live:ask-cancel',
+  /** main → renderer */
+  liveAnswerDelta: 'live:answer-delta',
+  /** main → renderer */
+  liveAnswerDone: 'live:answer-done',
+  /** main → renderer */
+  liveAnswerError: 'live:answer-error',
   practiceStart: 'practice:start',
   practiceAnswer: 'practice:answer',
   practiceCancel: 'practice:cancel',
@@ -233,6 +241,12 @@ export interface RendererApi {
     onStatus(cb: (s: LiveTranscriptStatus) => void): void;
     onLine(cb: (line: LiveLine) => void): void;
     onError(cb: (message: string) => void): void;
+    /** Ask the AI about one line (identified by `id`). Response streams via the on* callbacks. */
+    ask(id: number, text: string, length: AnswerLength): Promise<void>;
+    cancelAsk(): void;
+    onAnswerDelta(cb: (msg: { id: number; chunk: string }) => void): void;
+    onAnswerDone(cb: (msg: { id: number; full: string }) => void): void;
+    onAnswerError(cb: (msg: { id: number; message: string }) => void): void;
   };
   companion: {
     status(): Promise<CompanionStatus>;

@@ -19,7 +19,16 @@ const AskRequest = z.object({ id: z.number().int(), text: z.string().trim().min(
  * the previous). The line is redacted for obvious secrets before it leaves the machine — the
  * same guard the Explain flow uses. Results stream back tagged with the line's id.
  */
-export function registerLiveAnswerIpc(getWin: () => BrowserWindow | null, streamer: AnswerStreamer, getModel: () => AiModel): void {
+/**
+ * @param onResult called with the (already-redacted) question and the full answer when one
+ * completes — wired to the phone companion so answers also appear there when sharing is on.
+ */
+export function registerLiveAnswerIpc(
+  getWin: () => BrowserWindow | null,
+  streamer: AnswerStreamer,
+  getModel: () => AiModel,
+  onResult: (question: string, answer: string) => void = () => {},
+): void {
   let active: AbortController | null = null;
 
   const send = (channel: string, ...args: unknown[]) => {
@@ -38,6 +47,7 @@ export function registerLiveAnswerIpc(getWin: () => BrowserWindow | null, stream
     try {
       const full = await streamer({ model: getModel(), text: safe, length }, (chunk) => send(IPC.liveAnswerDelta, { id, chunk }), controller.signal);
       send(IPC.liveAnswerDone, { id, full });
+      if (full.trim()) onResult(safe, full);
     } catch (err) {
       if (!controller.signal.aborted) send(IPC.liveAnswerError, { id, message: (err as Error).message });
     } finally {

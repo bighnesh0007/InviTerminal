@@ -851,7 +851,11 @@ export async function ttsAutotest(win: BrowserWindow, controller: ProtectionCont
  * and a scripted transcriber, so the consent gate → capture → chunk → transcribe → line → panel
  * chain is observable without real audio or the whisper model. Also checks consent is required.
  */
-export async function liveTranscriptAutotest(win: BrowserWindow, controller: ProtectionController): Promise<void> {
+export async function liveTranscriptAutotest(
+  win: BrowserWindow,
+  controller: ProtectionController,
+  companion: { start(): Promise<unknown>; stop(): Promise<void>; currentUrl(): string | null },
+): Promise<void> {
   const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
   const clickIn = (scope: string, text: string) =>
     js<boolean>(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(scope)} + ' button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`);
@@ -864,9 +868,35 @@ export async function liveTranscriptAutotest(win: BrowserWindow, controller: Pro
     }
     return false;
   };
+  const { WebSocket } = await import('ws');
+  let ws: { close(): void } | null = null;
+  const pushed: { title?: string; text?: string }[] = [];
   try {
     await until('renderer', () => js<boolean>('!!window.inviterminal').catch(() => false), 10_000);
     await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
+
+    // Pair a phone (WS client) so we can confirm AI answers get pushed to it.
+    try {
+      await companion.start();
+      const url = companion.currentUrl();
+      if (url) {
+        const token = url.split('#t=')[1]!;
+        const wsUrl = url.split('/#')[0]!.replace('https', 'wss') + '/';
+        const socket = new WebSocket(wsUrl, ['inviterminal', token], { rejectUnauthorized: false });
+        ws = socket;
+        socket.on('message', (d: Buffer) => {
+          try {
+            const m = JSON.parse(d.toString());
+            if (m.type !== 'hello') pushed.push({ title: m.title, text: m.text });
+          } catch {
+            /* ignore */
+          }
+        });
+        await waitFor(async () => (await js<number>(`window.inviterminal.companion.status().then(s => s.clients)`)) >= 1, 5000);
+      }
+    } catch (e) {
+      log('companion-pair-error', { message: (e as Error).message });
+    }
 
     await clickIn('header', 'Live');
     await sleep(200);
@@ -894,12 +924,15 @@ export async function liveTranscriptAutotest(win: BrowserWindow, controller: Pro
     const gotAnswer = await waitFor(async () => /stub/.test(await js<string>(`document.querySelector('.live-item .live-answer').textContent || ''`)));
     log('ask-ai', { gotAnswer, answer: (await js<string>(`document.querySelector('.live-item .live-answer').textContent`)).slice(0, 60) });
 
-    // Select turns, then Ask selected → combined answer in the dedicated area.
-    await js(`document.querySelectorAll('.live-pick').forEach(c => c.click())`); // tick all turns
+    // New lines are auto-selected, so the count should already reflect every turn — just Ask.
     const selLabel = await js<string>(`document.querySelector('.live-ask-selected').textContent`);
     await js(`document.querySelector('.live-ask-selected').click()`);
     const gotSelected = await waitFor(async () => /stub/.test(await js<string>(`document.querySelector('.live-selected-answer').textContent || ''`)));
     log('ask-selected', { selLabel, gotSelected, answer: (await js<string>(`document.querySelector('.live-selected-answer').textContent`)).slice(0, 60) });
+
+    // The AI answers should have been pushed to the paired phone (WS client).
+    const pushedAnswer = await waitFor(async () => pushed.some((m) => m.title === 'AI answer'));
+    log('pushed-to-phone', { pushedAnswer, count: pushed.length, last: pushed.at(-1)?.text?.slice(0, 50) });
 
     // Behind the gate: removing protection conceals the panel.
     await controller.unprotect();
@@ -912,6 +945,12 @@ export async function liveTranscriptAutotest(win: BrowserWindow, controller: Pro
     log('stopped', { badgeHidden: await js<boolean>(`document.querySelector('.live-badge').hidden`) });
   } catch (e) {
     log('error', { message: (e as Error).message });
+  }
+  try {
+    ws?.close();
+    await companion.stop();
+  } catch {
+    /* ignore */
   }
   win.close();
 }

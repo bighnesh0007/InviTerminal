@@ -226,7 +226,10 @@ app.whenReady().then(async () => {
   const chatStreamer: ChatStreamer = autotest !== 'off' ? stubChatStreamer : (opts, onDelta, signal) => groq.chatStream(opts, onDelta, signal);
   registerPracticeIpc(() => mainWin, chatStreamer, () => settings.effective().ai.model);
   const answerStreamer: AnswerStreamer = autotest !== 'off' ? stubAnswerStreamer : (opts, onDelta, signal) => groq.answerStream(opts, onDelta, signal);
-  registerLiveAnswerIpc(() => mainWin, answerStreamer, () => settings.effective().ai.model);
+  registerLiveAnswerIpc(() => mainWin, answerStreamer, () => settings.effective().ai.model, (question, answer) => {
+    const q = question.length > 200 ? `${question.slice(0, 200)}…` : question;
+    companion.push({ type: 'explanation', title: 'AI answer', text: `Q: ${q}\n\n${answer}`, at: new Date().toISOString() });
+  });
 
   // Settings: applied live where possible; startup-only values are flagged as needing a restart.
   settings.onChange((v) => {
@@ -368,7 +371,7 @@ app.whenReady().then(async () => {
     if (first && autotest === 'tts') void done.then(() => ttsAutotest(win, controller, ttsSpoken));
     if (first && autotest === 'practice') void done.then(() => practiceAutotest(win, controller));
     if (first && autotest === 'companion') void done.then(() => companionAutotest(win, companion));
-    if (first && autotest === 'live') void done.then(() => liveTranscriptAutotest(win, controller));
+    if (first && autotest === 'live') void done.then(() => liveTranscriptAutotest(win, controller, companion));
     if (first && tap && autotest === 'library') void done.then(() => libraryAutotest(win, manager, tap, controller, library, inputs, config.snapshotPath));
     if (first && autotest === 'portal-shortcut') void done.then(() => portalShortcutAutotest(win, shortcut));
     if (first && tap && autotest === 'visibility') {

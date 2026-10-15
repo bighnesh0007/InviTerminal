@@ -97,6 +97,9 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     const pick = Object.assign(el('input'), { type: 'checkbox' });
     pick.className = 'live-pick';
     pick.title = 'Include this turn when you Ask selected';
+    // New turns are selected by default — the user unticks the ones to leave out, then Asks.
+    pick.checked = true;
+    selected.add(id);
     pick.addEventListener('change', () => {
       if (pick.checked) selected.add(id);
       else selected.delete(id);
@@ -114,6 +117,7 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     answer.hidden = true;
     feed.append(el('div', { className: 'live-item' }, el('div', { className: 'live-line' }, ...parts), answer));
     asks.set(id, { answer, btn: askBtn, started: false, busy: false });
+    updateSelectedBtn(); // reflect the auto-selected new line in the "Ask selected (N)" count
     feed.scrollTop = feed.scrollHeight;
   }
 

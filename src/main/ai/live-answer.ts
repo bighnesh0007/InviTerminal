@@ -12,7 +12,7 @@ export type AnswerStreamer = (
   signal: AbortSignal,
 ) => Promise<string>;
 
-const AskRequest = z.object({ id: z.number().int(), text: z.string().trim().min(1).max(4000), length: z.enum(ANSWER_LENGTHS) }).strict();
+const AskRequest = z.object({ id: z.number().int(), text: z.string().trim().min(1).max(16_000), length: z.enum(ANSWER_LENGTHS) }).strict();
 
 /**
  * "Ask AI" about a single transcript line. One answer in flight at a time (a new ask cancels

@@ -894,6 +894,13 @@ export async function liveTranscriptAutotest(win: BrowserWindow, controller: Pro
     const gotAnswer = await waitFor(async () => /stub/.test(await js<string>(`document.querySelector('.live-item .live-answer').textContent || ''`)));
     log('ask-ai', { gotAnswer, answer: (await js<string>(`document.querySelector('.live-item .live-answer').textContent`)).slice(0, 60) });
 
+    // Select turns, then Ask selected → combined answer in the dedicated area.
+    await js(`document.querySelectorAll('.live-pick').forEach(c => c.click())`); // tick all turns
+    const selLabel = await js<string>(`document.querySelector('.live-ask-selected').textContent`);
+    await js(`document.querySelector('.live-ask-selected').click()`);
+    const gotSelected = await waitFor(async () => /stub/.test(await js<string>(`document.querySelector('.live-selected-answer').textContent || ''`)));
+    log('ask-selected', { selLabel, gotSelected, answer: (await js<string>(`document.querySelector('.live-selected-answer').textContent`)).slice(0, 60) });
+
     // Behind the gate: removing protection conceals the panel.
     await controller.unprotect();
     await sleep(300);

@@ -38,6 +38,19 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   let askLength: AnswerLength = readStoredLength();
   let nextId = 1;
   const asks = new Map<number, { answer: HTMLElement; btn: HTMLButtonElement; started: boolean; busy: boolean }>();
+  // Curate turns, then ask about the selection as one conversation.
+  const selected = new Set<number>();
+  const lineData = new Map<number, LiveLine>();
+  const selectedAnswer = el('div', { className: 'live-answer live-selected-answer' });
+  selectedAnswer.hidden = true;
+  const askSelectedBtn = button('✨ Ask selected', () => askSelected());
+  askSelectedBtn.className = 'live-ask-selected';
+
+  function updateSelectedBtn(): void {
+    askSelectedBtn.textContent = selected.size ? `✨ Ask selected (${selected.size})` : '✨ Ask selected';
+    askSelectedBtn.disabled = selected.size === 0 || !aiReady;
+    askSelectedBtn.title = aiReady ? 'Send the ticked turns to the AI as one conversation' : 'Add a key in Settings to use Ask';
+  }
 
   const lengthButtons = ANSWER_LENGTHS.map((len) => {
     const b = button(ANSWER_LENGTH_LABELS[len], () => {
@@ -80,7 +93,16 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
 
   function line(l: LiveLine): void {
     const id = nextId++;
-    const parts = [el('span', { className: 'live-time', text: new Date(l.at).toLocaleTimeString() })];
+    lineData.set(id, l);
+    const pick = Object.assign(el('input'), { type: 'checkbox' });
+    pick.className = 'live-pick';
+    pick.title = 'Include this turn when you Ask selected';
+    pick.addEventListener('change', () => {
+      if (pick.checked) selected.add(id);
+      else selected.delete(id);
+      updateSelectedBtn();
+    });
+    const parts: HTMLElement[] = [pick, el('span', { className: 'live-time', text: new Date(l.at).toLocaleTimeString() })];
     if (l.speaker) parts.push(el('span', { className: 'live-speaker', text: l.speaker }));
     parts.push(el('span', { className: 'live-text', text: l.text }));
     const askBtn = button('✨ Ask', () => ask(id, l.text));
@@ -112,6 +134,30 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     }
   }
 
+  async function askSelected(): Promise<void> {
+    if (selected.size === 0) return;
+    // Combine the ticked turns in the order they appeared (Map preserves insertion order).
+    const combined = [...lineData.entries()]
+      .filter(([id]) => selected.has(id))
+      .map(([, l]) => (l.speaker ? `${l.speaker}: ${l.text}` : l.text))
+      .join('\n')
+      .slice(0, 12_000);
+    if (!combined.trim()) return;
+    const id = nextId++;
+    const entry = { answer: selectedAnswer, btn: askSelectedBtn, started: false, busy: true };
+    asks.set(id, entry);
+    askSelectedBtn.disabled = true;
+    selectedAnswer.hidden = false;
+    selectedAnswer.textContent = '…';
+    try {
+      await api.live.ask(id, combined, askLength);
+    } catch (e) {
+      selectedAnswer.textContent = `Error: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`;
+      entry.busy = false;
+      updateSelectedBtn();
+    }
+  }
+
   function render(s: LiveTranscriptStatus): void {
     active = s.active;
     diarizeAvailable = s.diarizeAvailable;
@@ -128,6 +174,11 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     say('');
     feed.replaceChildren();
     asks.clear();
+    selected.clear();
+    lineData.clear();
+    selectedAnswer.hidden = true;
+    selectedAnswer.textContent = '';
+    updateSelectedBtn();
     try {
       render(await api.live.start(consent.checked, diarize.checked));
       say('Transcribing. Play the call through your speakers; text appears below.');
@@ -154,18 +205,22 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     entry.answer.textContent += chunk;
     feed.scrollTop = feed.scrollHeight;
   });
+  const reenable = (btn: HTMLButtonElement) => {
+    if (btn === askSelectedBtn) updateSelectedBtn();
+    else btn.disabled = !aiReady;
+  };
   api.live.onAnswerDone(({ id }) => {
     const entry = asks.get(id);
     if (!entry) return;
     entry.busy = false;
-    entry.btn.disabled = !aiReady;
+    reenable(entry.btn);
   });
   api.live.onAnswerError(({ id, message }) => {
     const entry = asks.get(id);
     if (!entry) return;
     entry.answer.textContent = `Error: ${message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`;
     entry.busy = false;
-    entry.btn.disabled = !aiReady;
+    reenable(entry.btn);
   });
   void api.live.status().then((s) => {
     sttReady = !s.reason;
@@ -174,7 +229,8 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
 
   const renderAi = (s: AiStatus) => {
     aiReady = s.key.present;
-    for (const e of asks.values()) e.btn.disabled = e.busy || !aiReady;
+    for (const e of asks.values()) if (e.btn !== askSelectedBtn) e.btn.disabled = e.busy || !aiReady;
+    updateSelectedBtn();
   };
   void api.ai.status().then(renderAi);
   api.ai.onStatus(renderAi);
@@ -187,10 +243,13 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     diarizeLabel,
     el('div', { className: 'lib-actions' }, startBtn, stopBtn),
     lengthRow,
+    el('div', { className: 'live-select-row' }, el('span', { className: 'field-note', text: 'Tick turns, then:' }), askSelectedBtn),
+    selectedAnswer,
     feed,
     message,
   );
   setControls();
+  updateSelectedBtn();
 
   function readStoredLength(): AnswerLength {
     try {

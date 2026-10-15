@@ -134,7 +134,28 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   }, say);
   const summarizeBtn = button('✨ Summarize', () => summarize(), say);
   summarizeBtn.title = 'Summarize the whole conversation so far';
-  const toolbar = el('div', { className: 'live-toolbar' }, search, selAll, selNone, copyBtn, exportBtn, summarizeBtn);
+  // Irreversible, so it asks once: the first click arms it for 3s, the second clears.
+  const clearBtn = el('button', { text: '🗑 Clear', className: 'live-clear' });
+  clearBtn.type = 'button';
+  clearBtn.title = 'Delete the transcript and AI answers here and on the paired phone';
+  let clearArmed: ReturnType<typeof setTimeout> | null = null;
+  const disarm = () => {
+    if (clearArmed) clearTimeout(clearArmed);
+    clearArmed = null;
+    clearBtn.textContent = '🗑 Clear';
+    clearBtn.classList.remove('armed');
+  };
+  clearBtn.addEventListener('click', () => {
+    if (!clearArmed) {
+      clearBtn.textContent = 'Click again to clear';
+      clearBtn.classList.add('armed');
+      clearArmed = setTimeout(disarm, 3000);
+      return;
+    }
+    disarm();
+    void clearConversation().catch((e: Error) => say(clean(e.message)));
+  });
+  const toolbar = el('div', { className: 'live-toolbar' }, search, selAll, selNone, copyBtn, exportBtn, summarizeBtn, clearBtn);
 
   // ---- speakers row (rename) ----------------------------------------------------------------
   const speakersRow = el('div', { className: 'live-speakers' });
@@ -257,8 +278,8 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     setControls();
   }
 
-  async function start(): Promise<void> {
-    say('');
+  /** Forget everything on screen (transcript, answers, selection, search) — not the session itself. */
+  function wipe(): void {
     feed.replaceChildren();
     results.replaceChildren();
     resultsHead.hidden = true;
@@ -266,6 +287,17 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     lastItem = null;
     hub.reset();
     search.value = '';
+  }
+
+  async function clearConversation(): Promise<void> {
+    wipe();
+    render(await api.live.clear());
+    say(status?.active ? 'Cleared here and on the phone. New speech keeps appearing below.' : 'Cleared here and on the phone.');
+  }
+
+  async function start(): Promise<void> {
+    say('');
+    wipe();
     try {
       render(await api.live.start(consent.checked, modeSelect.value as SpeakerMode));
       say('Transcribing. New turns are ticked automatically — untick any you want to leave out, then Ask.');

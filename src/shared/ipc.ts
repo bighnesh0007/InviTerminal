@@ -86,6 +86,7 @@ export const IPC = {
   livePause: 'live:pause',
   liveResume: 'live:resume',
   liveExport: 'live:export',
+  liveClear: 'live:clear',
   /** main → renderer */
   liveStatusChanged: 'live:status-changed',
   /** main → renderer */
@@ -245,6 +246,8 @@ export interface RendererApi {
     /** Stop recording without ending the session; resume() continues it. */
     pause(): Promise<LiveTranscriptStatus>;
     resume(): Promise<LiveTranscriptStatus>;
+    /** Clear the conversation: restarts the line count and wipes the paired phone (and its backlog). */
+    clear(): Promise<LiveTranscriptStatus>;
     /** Save Markdown via a native Save dialog. Returns the saved path, or null if cancelled. */
     exportMarkdown(markdown: string, suggestedName: string): Promise<string | null>;
     onStatus(cb: (s: LiveTranscriptStatus) => void): void;

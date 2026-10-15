@@ -152,6 +152,8 @@ textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; 
 .live-toolbar[hidden], .live-length[hidden], .live-speakers[hidden], .live-empty[hidden] { display: none; }
 .live-toolbar button, .live-length button { font-size: 12px; padding: 2px 9px; }
 .live-search { flex: 1 1 100%; }
+.live-clear { margin-left: auto; }
+.live-clear.armed { background: var(--bad); border-color: var(--bad); color: #fff; }
 .live-speakers { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; margin: 2px 0 6px; }
 .live-speaker-name { display: flex; gap: 4px; align-items: center; color: var(--muted); }
 .live-speaker-name input { width: 110px; font-size: 12px; padding: 1px 6px; }

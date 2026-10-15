@@ -362,7 +362,7 @@ app.whenReady().then(async () => {
     // You/Them needs a microphone; autotests pretend one exists.
     () => (autotest !== 'off' ? 'fake-mic' : defaultMicSource()),
   );
-  registerLiveIpc(() => mainWin, live);
+  registerLiveIpc(() => mainWin, live, () => companion.push({ type: 'clear' }));
   app.on('before-quit', () => void live.stop());
 
   audio.onChange((st) => {

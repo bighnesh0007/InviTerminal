@@ -124,6 +124,7 @@ const api: RendererApi = {
     pause: () => ipcRenderer.invoke(IPC.livePause),
     resume: () => ipcRenderer.invoke(IPC.liveResume),
     exportMarkdown: (markdown, suggestedName) => ipcRenderer.invoke(IPC.liveExport, { markdown, suggestedName }),
+    clear: () => ipcRenderer.invoke(IPC.liveClear),
     onStatus: (cb) => {
       ipcRenderer.on(IPC.liveStatusChanged, (_e, s) => cb(s));
     },

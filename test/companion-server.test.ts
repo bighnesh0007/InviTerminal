@@ -201,6 +201,22 @@ describe('CompanionServer — remembered pairing, backlog, device names', () => 
     ws.close();
   });
 
+  it('clear is relayed to phones and empties the backlog, so cleared content never comes back', async () => {
+    server = new CompanionServer();
+    const s = await server.start(HOST);
+    server.push({ type: 'answer', title: 'AI answer', question: 'q', text: 'old answer', at: new Date().toISOString() });
+    server.push({ type: 'transcript', text: 'old line', at: new Date().toISOString() });
+    const first = await collect(s.port, tokenOf(s.url));
+    await vi.waitFor(() => expect(first.msgs.length).toBe(3)); // hello + 2 replayed
+    server.push({ type: 'clear' });
+    await vi.waitFor(() => expect(first.msgs.at(-1)).toMatchObject({ type: 'clear' }));
+    first.ws.close();
+    const later = await collect(s.port, tokenOf(s.url));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(later.msgs.map((m) => m.type)).toEqual(['hello']); // nothing old replayed
+    later.ws.close();
+  });
+
   it('records a phone-reported device name (sanitised); ignores any other message', async () => {
     const changes: number[] = [];
     server = new CompanionServer((n) => changes.push(n));

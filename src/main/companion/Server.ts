@@ -13,7 +13,9 @@ export type PushMessage =
   | { type: 'explanation'; title: string; text: string; at: string }
   | { type: 'answer'; title: string; question: string; text: string; at: string }
   | { type: 'transcript'; text: string; speaker?: string; at: string }
-  | { type: 'meeting-summary'; title: string; text: string; at: string };
+  | { type: 'meeting-summary'; title: string; text: string; at: string }
+  /** The user cleared the conversation: phones wipe their view; the backlog is emptied too. */
+  | { type: 'clear' };
 
 /** The TLS key/cert and pairing token. Persisted by the controller so a phone stays paired. */
 export interface Identity {
@@ -168,7 +170,11 @@ export class CompanionServer {
   push(msg: PushMessage): number {
     if (!this.https) return 0;
     const data = JSON.stringify({ ...msg, seq: ++this.seq });
-    if (msg.type === 'transcript') {
+    if (msg.type === 'clear') {
+      // Cleared content must not come back to a phone that reconnects later.
+      this.backlogAnswers = [];
+      this.backlogTranscript = [];
+    } else if (msg.type === 'transcript') {
       this.backlogTranscript.push(data);
       if (this.backlogTranscript.length > BACKLOG_TRANSCRIPT) this.backlogTranscript.shift();
     } else if (msg.type !== 'hello') {

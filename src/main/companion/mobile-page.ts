@@ -104,7 +104,8 @@ footer button{border:1px solid #23262e;background:#1a1d24;color:#e6e6e6;border-r
   }
   function sendName() { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'name', name: nameBox.value.trim().slice(0, 40) })); }
   nameBox.onchange = function () { try { localStorage.setItem('invi.name', nameBox.value.trim()); } catch (e) {} sendName(); };
-  $('clear').onclick = function () { answers.querySelectorAll('.card').forEach(function (c) { c.remove(); }); transcript.querySelectorAll('.line').forEach(function (c) { c.remove(); }); $('eA').hidden = false; $('eT').hidden = false; unread = { A: 0, T: 0 }; badge(); };
+  function wipe() { answers.querySelectorAll('.card').forEach(function (c) { c.remove(); }); transcript.querySelectorAll('.line').forEach(function (c) { c.remove(); }); $('eA').hidden = false; $('eT').hidden = false; unread = { A: 0, T: 0 }; badge(); }
+  $('clear').onclick = wipe;
 
   function connect() {
     clearTimeout(timer); timer = null;
@@ -118,7 +119,7 @@ footer button{border:1px solid #23262e;background:#1a1d24;color:#e6e6e6;border-r
       var m; try { m = JSON.parse(e.data); } catch (x) { return; }
       if (m.type === 'hello') { if (m.session !== session) { session = m.session; seen = {}; } return; }
       if (m.seq != null) { if (seen[m.seq]) return; seen[m.seq] = 1; }
-      if (m.type === 'transcript') addLine(m); else addCard(m);
+      if (m.type === 'clear') wipe(); else if (m.type === 'transcript') addLine(m); else addCard(m);
     };
   }
   function retry() { clearTimeout(timer); timer = setTimeout(connect, delay); delay = Math.min(delay * 2, 10000); }

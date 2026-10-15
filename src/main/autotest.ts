@@ -981,6 +981,25 @@ export async function liveTranscriptAutotest(
       lateSawHello: late[0]?.type === 'hello',
     });
 
+    // Clear: first click only arms it; the second wipes the desktop, the phone, and the backlog.
+    // Pause first so no new speech can arrive — then "nothing left" really means Clear removed it all.
+    await clickIn('.live-panel', '⏸ Pause');
+    await sleep(800); // let any chunk already being transcribed land before clearing
+    await js(`document.querySelector('.live-clear').click()`);
+    const armedOnly = (await lines()).length > 0;
+    await js(`document.querySelector('.live-clear').click()`);
+    await sleep(300);
+    const after = await pairPhone();
+    await sleep(300);
+    log('clear', {
+      armedFirst: armedOnly,
+      linesLeft: (await lines()).length,
+      answersLeft: await js<number>(`document.querySelectorAll('.thread').length`),
+      count: await js<number>(`window.inviterminal.live.status().then(s => s.lines)`),
+      phoneGotClear: phone.some((m) => m.type === 'clear'),
+      laterPhoneBacklog: after.filter((m) => m.type !== 'hello').length,
+    });
+
     await controller.unprotect();
     await sleep(300);
     log('gated', { visibility: await js<string>(`getComputedStyle(document.querySelector('.live-panel')).visibility`) });

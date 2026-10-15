@@ -9,8 +9,11 @@ import type { LiveTranscriptController } from './LiveTranscriptController';
 const StartRequest = z.object({ consent: z.boolean(), mode: z.enum(SPEAKER_MODES).optional() }).strict();
 const ExportRequest = z.object({ markdown: z.string().max(5_000_000), suggestedName: z.string().max(200) }).strict();
 
-/** Live-transcript IPC: start is consent-gated; status/lines/errors stream to the renderer. */
-export function registerLiveIpc(getWin: () => BrowserWindow | null, live: LiveTranscriptController): void {
+/**
+ * Live-transcript IPC: start is consent-gated; status/lines/errors stream to the renderer.
+ * @param onClear also wipe the conversation elsewhere (the paired phone and its backlog).
+ */
+export function registerLiveIpc(getWin: () => BrowserWindow | null, live: LiveTranscriptController, onClear: () => void = () => {}): void {
   const guard = (e: Electron.IpcMainInvokeEvent) => {
     if (!isFromWindow(e, getWin())) throw new Error('IPC from unexpected sender');
   };
@@ -35,6 +38,12 @@ export function registerLiveIpc(getWin: () => BrowserWindow | null, live: LiveTr
   ipcMain.handle(IPC.liveResume, (e) => {
     guard(e);
     live.resume();
+    return live.status();
+  });
+  ipcMain.handle(IPC.liveClear, (e) => {
+    guard(e);
+    live.clearLines();
+    onClear();
     return live.status();
   });
   // Export goes through a native Save dialog, so the renderer never chooses a filesystem path itself.

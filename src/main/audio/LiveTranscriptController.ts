@@ -174,6 +174,12 @@ export class LiveTranscriptController {
     return this.status();
   }
 
+  /** The user cleared the conversation: restart the line count (capture, if running, carries on). */
+  clearLines(): void {
+    this.lineCount = 0;
+    this.emitState();
+  }
+
   /** Stop recording but keep the session (and its lines); resume() continues it. */
   pause(): void {
     if (!this.session || this.procs.length === 0) return;

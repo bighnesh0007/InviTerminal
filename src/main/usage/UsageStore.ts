@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync, renameSync } from 'node:fs';
-import { chmod, rename, writeFile } from 'node:fs/promises';
+import { chmodSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmod, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { isUsageAction, USAGE_ACTION_LABELS, USAGE_ACTIONS, type UsageCounts, type UsageRow, type UsageView } from '../../shared/usage';
@@ -27,6 +27,10 @@ export class UsageStore {
   private timer: NodeJS.Timeout | null = null;
   /** Serializes writes so two flushes can't interleave on the same file. */
   private writing: Promise<void> = Promise.resolve();
+  /** Async writes queued or running (counted from the moment flush() takes the snapshot). */
+  private pendingWrites = 0;
+  /** Set by flushSync at quit: queued async writes then stand down instead of renaming. */
+  private closed = false;
 
   constructor(
     private readonly dir: string,
@@ -119,17 +123,50 @@ export class UsageStore {
     if (!this.dirty) return this.writing;
     this.dirty = false;
     const snapshot = structuredClone(this.counts);
+    this.pendingWrites++;
     const run = async () => {
+      const tmp = join(this.dir, `.${FILE}.${randomBytes(4).toString('hex')}.tmp`);
       try {
-        const tmp = join(this.dir, `.${FILE}.${randomBytes(4).toString('hex')}.tmp`);
         await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`, { mode: 0o600 });
         await chmod(tmp, 0o600); // in case umask widened it
+        // flushSync already wrote a newer superset at quit; renaming this older snapshot over it would lose data.
+        if (this.closed) {
+          await rm(tmp, { force: true });
+          return;
+        }
         await rename(tmp, join(this.dir, FILE));
       } catch {
         // A failed usage write must never surface to the user.
+      } finally {
+        this.pendingWrites--;
       }
     };
     this.writing = this.writing.then(run, run);
     return this.writing;
+  }
+
+  /**
+   * Synchronous final flush for app quit. An async flush can't be awaited at quit — the process
+   * exits first — so without this, anything tracked in the last debounce window was lost.
+   * Writes the full current counts (a superset of any queued snapshot), then marks the store
+   * closed so queued async writes skip their rename. Never throws.
+   */
+  flushSync(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    const needed = this.dirty || this.pendingWrites > 0;
+    this.closed = true;
+    if (!needed) return;
+    this.dirty = false;
+    try {
+      const tmp = join(this.dir, `.${FILE}.${randomBytes(4).toString('hex')}.tmp`);
+      writeFileSync(tmp, `${JSON.stringify(this.counts, null, 2)}\n`, { mode: 0o600 });
+      chmodSync(tmp, 0o600);
+      renameSync(tmp, join(this.dir, FILE));
+    } catch {
+      // A failed usage write must never surface to the user.
+    }
   }
 }

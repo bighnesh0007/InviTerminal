@@ -182,6 +182,49 @@ describe('UsageStore', () => {
     expect(onDisk['panel.live'].count).toBe(4);
   });
 
+  describe('flushSync (app quit)', () => {
+    it('persists a still-debounced increment immediately, with no await', () => {
+      // Regression: the quit hook used an async flush, which the exiting process cut off — an
+      // action in the last second before quit (e.g. Explain → close) was silently lost.
+      const dir = tempDir();
+      const s = new UsageStore(dir, FIXED);
+      s.track('ai.explain');
+      s.flushSync();
+      const onDisk = JSON.parse(readFileSync(join(dir, FILE), 'utf8'));
+      expect(onDisk['ai.explain'].count).toBe(1);
+      expect(statSync(join(dir, FILE)).mode & 0o777).toBe(0o600);
+    });
+
+    it('writes nothing when nothing is pending', () => {
+      const dir = tempDir();
+      new UsageStore(dir, FIXED).flushSync();
+      expect(readdirSync(dir)).toEqual([]);
+    });
+
+    it('a write queued just before quit is not lost (flushSync covers it)', async () => {
+      const dir = tempDir();
+      const s = new UsageStore(dir, FIXED);
+      s.track('panel.live');
+      const queued = s.flush(); // took the snapshot, but its write hasn't run yet
+      s.flushSync(); // quit happens right now
+      expect(JSON.parse(readFileSync(join(dir, FILE), 'utf8'))['panel.live'].count).toBe(1);
+      await queued;
+      expect(JSON.parse(readFileSync(join(dir, FILE), 'utf8'))['panel.live'].count).toBe(1);
+    });
+
+    it('a queued older snapshot cannot overwrite the newer quit-time write', async () => {
+      const dir = tempDir();
+      const s = new UsageStore(dir, FIXED);
+      s.track('panel.live');
+      const queued = s.flush(); // snapshot: count 1
+      s.track('panel.live'); // count 2, after the snapshot
+      s.flushSync(); // writes count 2
+      await queued; // the stale count-1 write must stand down, not rename over it
+      expect(JSON.parse(readFileSync(join(dir, FILE), 'utf8'))['panel.live'].count).toBe(2);
+      expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]); // its temp file was removed
+    });
+  });
+
   it('a failed write never rejects (tracking must not crash the app)', async () => {
     // A directory that does not exist makes the atomic write fail; flush must still resolve.
     const s = new UsageStore(join(tmpdir(), 'invi-usage-does-not-exist-xyz'), FIXED);

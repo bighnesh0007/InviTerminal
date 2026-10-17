@@ -196,7 +196,8 @@ app.whenReady().then(async () => {
   // counts are untouched. A tracking failure can never affect the app.
   const usage = new UsageStore(app.getPath('userData'));
   registerUsageIpc(() => mainWin, usage);
-  app.on('will-quit', () => void usage.flush());
+  // Synchronous: an async write would be cut off by the exit, losing the last second of counts.
+  app.on('will-quit', () => usage.flushSync());
 
   // Every autotest uses a throwaway mongod (system binary, temp dir) — never the shared server.
   let memServer: { getUri(): string; stop(): Promise<boolean> } | null = null;

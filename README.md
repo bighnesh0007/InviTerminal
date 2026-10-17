@@ -31,6 +31,10 @@ or put `GROQ_API_KEY=…` in a `.env` at the repo root; see [.env.example](.env.
 model is the cheapest/fastest (`openai/gpt-oss-20b`):
 - **Explain output** (Ctrl+Shift+E) — selected terminal text → Groq, streamed into a side
   panel, behind a confirm-preview that masks obvious secrets. Nothing is sent until you confirm.
+  - **Auto-explain errors** (opt-in, **off** by default — Settings → AI assistant): when a command's
+    output looks like a failure ("command not found", a stack trace, `fatal:`…), the recent output
+    is sent automatically (secrets masked) and the explanation opens marked **AUTO**. Only the tab
+    you're viewing, at most once per failure; your commands run exactly as normal.
 - **Microphone + local transcription** — off by default, a red REC badge + tray indicator
   while live; whisper.cpp transcribes **on your machine** and the audio is deleted (never uploaded).
 - **Interview practice** — the model asks questions, you answer aloud (local transcription) or
@@ -61,14 +65,16 @@ Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 [Phase 7](docs/08-phase7-ai-features-plan.md) ·
 [Phase 8](docs/09-phase8-companion-plan.md) ·
 [Phase 9](docs/10-phase9-live-transcript.md) ·
-[Phase 10](docs/11-phase10-live-polish.md).
+[Phase 10](docs/11-phase10-live-polish.md) ·
+[Usage + Auto-explain](docs/13-usage-and-auto-explain.md).
 
 ### Verified vs. not
 
 - **Verified live on KDE Plasma (Wayland):** capture exclusion (screenshot path), terminal,
   show/hide + tray + panic key, global shortcut, snippet library, settings/tabs, packaging
   (AppImage + Arch), local speech-to-text, the interviewer read-aloud toggle (with a fake
-  engine, both controls), and the AI flows with stub models.
+  engine, both controls), the AI flows with stub models (incl. Auto-explain: off sends nothing,
+  a planted secret never reaches the model), and the usage tracker (real gestures → `usage.json`).
 - **Not yet verified (need you, or hardware):** the portal screencast / Google Meet checks;
   real Groq calls (add your key, then Settings → Test key); the global-shortcut restart /
   double-fire follow-ups; and Windows (needs a Windows machine).
@@ -77,6 +83,11 @@ Results: [Phase 2](docs/03-phase2-terminal-results.md) ·
 (`~/.config/inviterminal/` by default, mode 0600). Font, scrollback, the shell for new
 tabs, the shortcuts and the library database apply immediately. Shortcuts are recorded
 by pressing them; any that would steal a key the shell needs are refused.
+
+**Settings → Usage (local only)** shows how often you use each feature (counts + last used;
+never-used ones dimmed), with Export JSON and Reset. It records only action names, counts and
+times in `usage.json` — never your commands, transcripts, prompts or answers — and nothing is
+sent anywhere.
 
 Until packaging, the dev form of `inviterminal` is:
 `node_modules/electron/dist/electron /path/to/InviTerminal --toggle`

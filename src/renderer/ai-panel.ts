@@ -2,6 +2,7 @@ import type { RendererApi } from '../shared/ipc';
 import { AI_MODEL_LABELS, AI_PROVIDER, type AiStatus } from '../shared/ai';
 import { redactSecrets, summarizeRedactions } from '../shared/redact';
 import { button, el } from './dom';
+import { track } from './usage';
 
 export interface AiPanelView {
   element: HTMLElement;
@@ -67,6 +68,7 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
   api.ai.onExplainCancelled(() => endStream('Stopped.'));
 
   async function startStream(text: string): Promise<void> {
+    track(api, 'ai.explain');
     confirm.hidden = true;
     output.textContent = '';
     outputWrap.hidden = false;

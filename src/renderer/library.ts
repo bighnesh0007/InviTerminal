@@ -1,6 +1,7 @@
 import type { RendererApi } from '../shared/ipc';
 import { LANGUAGES, textForInsert, type Language, type LibraryStatus, type Snippet, type SnippetInput } from '../shared/snippet';
 import { button, el } from './dom';
+import { track } from './usage';
 
 export interface LibraryView {
   element: HTMLElement;
@@ -114,6 +115,7 @@ export function mountLibrary(api: RendererApi, opts: { paste(text: string): void
     }
     const { text, multiline } = textForInsert(s.body);
     const doInsert = async () => {
+      track(api, 'library.paste');
       opts.paste(text);
       await api.library.used(s.id);
       say(`Inserted “${s.title}” — review it, then press Enter to run.`);
@@ -175,6 +177,7 @@ export function mountLibrary(api: RendererApi, opts: { paste(text: string): void
           tags: fTags.value.split(',').map((t) => t.trim()).filter(Boolean),
           folder: fFolder.value,
         };
+        if (!editing) track(api, 'library.create');
         const saved = editing ? await api.library.update(editing.id, input) : await api.library.create(input);
         say(`Saved “${saved.title}”.`);
         closeEditor();
@@ -209,6 +212,10 @@ export function mountLibrary(api: RendererApi, opts: { paste(text: string): void
   search.addEventListener('input', () => {
     clearTimeout(debounce);
     debounce = window.setTimeout(() => void refresh().catch((e: Error) => say(e.message)), 150);
+  });
+  // Count a committed search (Enter/blur with text), not every keystroke, to avoid inflating the counter.
+  search.addEventListener('change', () => {
+    if (search.value.trim()) track(api, 'library.search');
   });
   folderSelect.addEventListener('change', () => void refresh().catch((e: Error) => say(e.message)));
   trashToggle.addEventListener('change', () => void refresh().catch((e: Error) => say(e.message)));

@@ -193,3 +193,22 @@ textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; 
 .thread-btn { font-size: 11px; padding: 1px 7px; }
 .thread-follow { width: 100%; font-size: 12px; padding: 3px 6px; }
 .companion-devices { font-weight: 600; margin: 4px 0; }
+
+/* Usage (Settings → local-only telemetry table) */
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 6px 0;
+}
+.usage-table th,
+.usage-table td {
+  text-align: left;
+  padding: 3px 8px;
+  border-bottom: 1px solid #23262e;
+  vertical-align: top;
+}
+.usage-table th { color: var(--muted); font-weight: 600; }
+.usage-table .usage-count { text-align: right; font-variant-numeric: tabular-nums; }
+.usage-table .usage-when { color: var(--muted); white-space: nowrap; }
+.usage-table tr.usage-unused td { opacity: 0.5; }

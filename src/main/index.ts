@@ -41,6 +41,8 @@ import { type ChatStreamer, registerPracticeIpc } from './ai/practice';
 import { type AnswerStreamer, registerLiveAnswerIpc } from './ai/live-answer';
 import { LibraryService } from './library/LibraryService';
 import { registerLibraryIpc } from './library/register';
+import { UsageStore } from './usage/UsageStore';
+import { registerUsageIpc } from './usage/register';
 import { isProductionBuild } from './build-mode';
 import { createWindow } from './window';
 
@@ -188,6 +190,13 @@ app.whenReady().then(async () => {
     };
   }
   registerTerminalIpc(() => mainWin, manager);
+
+  // Local-only usage counters (which features get used). Static action IDs + counts + timestamps,
+  // never content, never sent anywhere. Autotests already point userData at a temp dir, so real
+  // counts are untouched. A tracking failure can never affect the app.
+  const usage = new UsageStore(app.getPath('userData'));
+  registerUsageIpc(() => mainWin, usage);
+  app.on('will-quit', () => void usage.flush());
 
   // Every autotest uses a throwaway mongod (system binary, temp dir) — never the shared server.
   let memServer: { getUri(): string; stop(): Promise<boolean> } | null = null;

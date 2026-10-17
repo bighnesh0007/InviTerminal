@@ -1,6 +1,7 @@
 import type { RendererApi, ShellProfileInfo } from '../shared/ipc';
 import { button, el } from './dom';
 import { mountTerminal, type TerminalOptions, type TerminalView } from './terminal';
+import { track } from './usage';
 
 interface Tab {
   id: number;
@@ -35,7 +36,16 @@ export function mountTabs(container: HTMLElement, api: RendererApi, opts: { inpu
   const list = el('div', { className: 'tab-list' });
   const profileSelect = el('select', { className: 'tab-profile' });
   profileSelect.title = 'Shell for new tabs';
-  const bar = el('div', { className: 'tab-bar' }, list, button('+', () => newTab(profileSelect.value || undefined)), profileSelect);
+  const bar = el(
+    'div',
+    { className: 'tab-bar' },
+    list,
+    button('+', () => {
+      track(api, 'terminal.newTab');
+      newTab(profileSelect.value || undefined);
+    }),
+    profileSelect,
+  );
 
   async function refreshProfiles(): Promise<void> {
     const profiles: ShellProfileInfo[] = await api.terminal.profiles();
@@ -86,7 +96,10 @@ export function mountTabs(container: HTMLElement, api: RendererApi, opts: { inpu
       if (e.target === close) return;
       activate(id);
     });
-    close.addEventListener('click', () => closeTab(id));
+    close.addEventListener('click', () => {
+      track(api, 'terminal.closeTab');
+      closeTab(id);
+    });
     activate(id);
   }
 

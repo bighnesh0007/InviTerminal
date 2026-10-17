@@ -155,6 +155,19 @@ const api: RendererApi = {
     stop: () => ipcRenderer.invoke(IPC.companionStop),
     forget: () => ipcRenderer.invoke(IPC.companionForget),
   },
+  usage: {
+    // Fire-and-forget: a tracking call must never throw into the caller's code path.
+    track: (action) => {
+      try {
+        ipcRenderer.send(IPC.usageTrack, { action });
+      } catch {
+        /* ignore */
+      }
+    },
+    get: () => ipcRenderer.invoke(IPC.usageGet),
+    reset: () => ipcRenderer.invoke(IPC.usageReset),
+    export: () => ipcRenderer.invoke(IPC.usageExport),
+  },
   practice: {
     start: (topic) => ipcRenderer.invoke(IPC.practiceStart, { topic }),
     answer: (answer) => ipcRenderer.invoke(IPC.practiceAnswer, { answer }),

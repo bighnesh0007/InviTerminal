@@ -5,6 +5,7 @@ import type { AudioKind, AudioStatus, LiveLine, LiveTranscriptStatus, SpeakerMod
 import type { CompanionStatus } from './companion';
 import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
+import type { UsageAction, UsageView } from './usage';
 
 export const IPC = {
   getState: 'protection:get-state',
@@ -117,6 +118,11 @@ export const IPC = {
   companionForget: 'companion:forget',
   /** main → renderer */
   companionStatusChanged: 'companion:status-changed',
+  /** renderer → main: one-way, best-effort local usage counter bump. */
+  usageTrack: 'usage:track',
+  usageGet: 'usage:get',
+  usageReset: 'usage:reset',
+  usageExport: 'usage:export',
 } as const;
 
 export interface ConcealRequest {
@@ -271,6 +277,16 @@ export interface RendererApi {
     stop(): Promise<void>;
     /** Forget paired phones: rotate the remembered token + certificate, so every phone must re-scan. */
     forget(): Promise<CompanionStatus>;
+  };
+  /** Local-only, privacy-safe usage counters (static action IDs + counts + timestamps). */
+  usage: {
+    /** Best-effort, fire-and-forget. Only the closed set of UsageAction IDs is accepted. */
+    track(action: UsageAction): void;
+    get(): Promise<UsageView>;
+    /** Wipe all counters; returns the (now empty) view. */
+    reset(): Promise<UsageView>;
+    /** Save the counts as JSON via a native dialog; returns the path, or null if cancelled. */
+    export(): Promise<string | null>;
   };
   practice: {
     start(topic: string): Promise<void>;

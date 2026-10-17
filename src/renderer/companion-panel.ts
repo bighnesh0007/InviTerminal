@@ -1,6 +1,7 @@
 import type { CompanionStatus } from '../shared/companion';
 import type { RendererApi } from '../shared/ipc';
 import { button, el } from './dom';
+import { track } from './usage';
 
 export interface CompanionPanelView {
   element: HTMLElement;
@@ -69,6 +70,7 @@ export function mountCompanionPanel(api: RendererApi, opts: { onOpenChange(open:
   }
 
   const startBtn = button('Start sharing', async () => {
+    track(api, 'companion.start');
     say('Starting the local server…');
     try {
       render(await api.companion.start());
@@ -83,6 +85,7 @@ export function mountCompanionPanel(api: RendererApi, opts: { onOpenChange(open:
   }, say);
   stopBtn.hidden = true;
   const forgetBtn = button('Forget paired phones', async () => {
+    track(api, 'companion.forget');
     render(await api.companion.forget());
     say('Forgotten. Every phone must scan the new QR to pair again.');
   }, say);

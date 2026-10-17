@@ -13,6 +13,7 @@ import { mountPracticePanel } from './practice-panel';
 import { mountLiveTranscriptPanel } from './live-transcript-panel';
 import { mountSettings } from './settings';
 import { mountTabs } from './tabs';
+import { track } from './usage';
 
 declare global {
   interface Window {
@@ -287,14 +288,40 @@ function renderMain(): void {
     gaps,
   );
 
-  const hideButton = button('Hide', () => api.visibility.panicHide());
-  const libraryButton = button('Snippets', () => library.toggle());
-  const explainButton = button('Explain', () => explainSelection());
-  const micButton = button('Mic', () => audioPanel.toggle());
-  const practiceButton = button('Practice', () => practicePanel.toggle());
-  const shareButton = button('Share', () => companionPanel.toggle());
-  const liveButton = button('Live', () => livePanel.toggle());
-  const settingsButton = button('Settings', () => settingsPanel.toggle());
+  // Header buttons. Each counts the gesture (clicking the button); the keyboard shortcuts below
+  // count separately, so the Usage table reflects how a feature is actually reached.
+  const hideButton = button('Hide', () => {
+    track(api, 'hide.panic');
+    return api.visibility.panicHide();
+  });
+  const libraryButton = button('Snippets', () => {
+    track(api, 'panel.library');
+    return library.toggle();
+  });
+  const explainButton = button('Explain', () => {
+    track(api, 'panel.ai');
+    return explainSelection();
+  });
+  const micButton = button('Mic', () => {
+    track(api, 'panel.audio');
+    return audioPanel.toggle();
+  });
+  const practiceButton = button('Practice', () => {
+    track(api, 'panel.practice');
+    return practicePanel.toggle();
+  });
+  const shareButton = button('Share', () => {
+    track(api, 'panel.companion');
+    return companionPanel.toggle();
+  });
+  const liveButton = button('Live', () => {
+    track(api, 'panel.live');
+    return livePanel.toggle();
+  });
+  const settingsButton = button('Settings', () => {
+    track(api, 'panel.settings');
+    return settingsPanel.toggle();
+  });
   document.body.append(el('header', { className: 'bar' }, el('h1', { text: 'InviTerminal' }), pill, audioPanel.badge, companionPanel.badge, livePanel.badge, el('span', { className: 'spacer' }), explainButton, micButton, practiceButton, shareButton, liveButton, libraryButton, settingsButton, hideButton, drawerToggle), drawer, termWrap);
 
   // Button tooltips show the current shortcuts.
@@ -325,14 +352,38 @@ function renderMain(): void {
   });
 
   const actions: Record<AppAction, () => void> = {
-    panicHide: () => api.visibility.panicHide(),
-    toggleLibrary: () => library.toggle(),
-    openSettings: () => settingsPanel.toggle(),
-    explainSelection: () => explainSelection(),
-    newTab: () => tabs.newTab(),
-    closeTab: () => tabs.closeActive(),
-    nextTab: () => tabs.next(),
-    prevTab: () => tabs.prev(),
+    panicHide: () => {
+      track(api, 'hide.panic');
+      api.visibility.panicHide();
+    },
+    toggleLibrary: () => {
+      track(api, 'panel.library');
+      library.toggle();
+    },
+    openSettings: () => {
+      track(api, 'panel.settings');
+      settingsPanel.toggle();
+    },
+    explainSelection: () => {
+      track(api, 'panel.ai');
+      explainSelection();
+    },
+    newTab: () => {
+      track(api, 'terminal.newTab');
+      tabs.newTab();
+    },
+    closeTab: () => {
+      track(api, 'terminal.closeTab');
+      tabs.closeActive();
+    },
+    nextTab: () => {
+      track(api, 'terminal.nextTab');
+      tabs.next();
+    },
+    prevTab: () => {
+      track(api, 'terminal.prevTab');
+      tabs.prev();
+    },
   };
   // App shortcuts are taken in the capture phase, before xterm.js sees the key, so they never reach the shell.
   window.addEventListener(

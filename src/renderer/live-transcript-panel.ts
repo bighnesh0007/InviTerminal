@@ -2,6 +2,7 @@ import { ANSWER_LENGTHS, ANSWER_LENGTH_LABELS, type AiStatus, type AnswerLength 
 import { type LiveLine, type LiveTranscriptStatus, SPEAKER_MODE_LABELS, SPEAKER_MODES, type SpeakerMode } from '../shared/audio';
 import type { RendererApi } from '../shared/ipc';
 import { button, el } from './dom';
+import { track } from './usage';
 import { createAnswerHub, type Thread } from './live-answers';
 import { buildTranscriptMarkdown, plainTranscript, shouldMerge } from './live-format';
 
@@ -87,6 +88,7 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   for (const m of SPEAKER_MODES) modeSelect.append(Object.assign(el('option', { text: SPEAKER_MODE_LABELS[m] }), { value: m }));
   const modeHint = el('span', { className: 'field-note' });
   modeSelect.addEventListener('change', () => {
+    track(api, 'live.speakerMode');
     renderModeHint();
     void api.settings.update({ liveTranscript: { speakerMode: modeSelect.value as SpeakerMode } }).catch(() => undefined);
   });
@@ -123,10 +125,12 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   selAll.title = 'Tick every visible turn';
   selNone.title = 'Untick every visible turn';
   const copyBtn = button('Copy', async () => {
+    track(api, 'live.copy');
     await api.clipboard.write(plainTranscript([...items.values()], display));
     say('Transcript copied.');
   }, say);
   const exportBtn = button('Export .md', async () => {
+    track(api, 'live.export');
     const md = buildTranscriptMarkdown([...items.values()], hub.threads(), display, status?.speakerMode ?? (modeSelect.value as SpeakerMode));
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
     const path = await api.live.exportMarkdown(md, `transcript-${stamp}.md`);
@@ -290,12 +294,14 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   }
 
   async function clearConversation(): Promise<void> {
+    track(api, 'live.clear');
     wipe();
     render(await api.live.clear());
     say(status?.active ? 'Cleared here and on the phone. New speech keeps appearing below.' : 'Cleared here and on the phone.');
   }
 
   async function start(): Promise<void> {
+    track(api, 'live.start');
     say('');
     wipe();
     try {
@@ -334,6 +340,7 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
     const item: Item = { id, at: l.at, lastAt: l.at, text: l.text, el: itemEl, textEl, speakerEl, pick, slot, ...(l.speaker ? { speaker: l.speaker } : {}) };
     editBtn.addEventListener('click', () => editLine(item));
     askBtn.addEventListener('click', () => {
+      track(api, 'live.ask');
       if (item.thread) (item.thread.el.querySelector('.thread-follow') as HTMLInputElement | null)?.focus();
       else item.thread = hub.open(item.slot, { label: 'Answer', question: item.text });
     });
@@ -404,6 +411,7 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   function askSelected(): void {
     const list = selectedItems();
     if (!list.length) return;
+    track(api, 'live.askSelected');
     hub.open(results, { label: `Selection · ${list.length} turn${list.length === 1 ? '' : 's'}`, question: asConversation(list).slice(0, 15_000), prepend: true });
     noteResult();
   }
@@ -411,6 +419,7 @@ export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(
   function summarize(): void {
     const list = [...items.values()];
     if (!list.length) return;
+    track(api, 'live.summarize');
     // Long meetings: keep the most recent part that fits (the request is capped at 16k chars).
     let text = asConversation(list);
     if (text.length > 15_000) text = `…${text.slice(-15_000)}`;

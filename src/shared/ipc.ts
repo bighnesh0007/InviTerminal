@@ -1,10 +1,11 @@
 import type { CanarySequence } from './canary';
 import type { ProtectionState, SelfTestRecord } from './protection';
-import type { AiStatus, AnswerLength } from './ai';
-import type { AudioKind, AudioStatus, LiveLine, LiveTranscriptStatus, SttStatus, TtsStatus } from './audio';
+import type { AiStatus, AnswerLength, AskMode, ChatTurn } from './ai';
+import type { AudioKind, AudioStatus, LiveLine, LiveTranscriptStatus, SpeakerMode, SttStatus, TtsStatus } from './audio';
 import type { CompanionStatus } from './companion';
 import type { SettingsPatch, SettingsView } from './settings';
 import type { LibraryStatus, SearchQuery, Snippet, SnippetInput } from './snippet';
+import type { UsageAction, UsageView } from './usage';
 
 export const IPC = {
   getState: 'protection:get-state',
@@ -83,6 +84,10 @@ export const IPC = {
   liveStatus: 'live:status',
   liveStart: 'live:start',
   liveStop: 'live:stop',
+  livePause: 'live:pause',
+  liveResume: 'live:resume',
+  liveExport: 'live:export',
+  liveClear: 'live:clear',
   /** main → renderer */
   liveStatusChanged: 'live:status-changed',
   /** main → renderer */
@@ -110,8 +115,14 @@ export const IPC = {
   companionStart: 'companion:start',
   companionStop: 'companion:stop',
   companionStatus: 'companion:status',
+  companionForget: 'companion:forget',
   /** main → renderer */
   companionStatusChanged: 'companion:status-changed',
+  /** renderer → main: one-way, best-effort local usage counter bump. */
+  usageTrack: 'usage:track',
+  usageGet: 'usage:get',
+  usageReset: 'usage:reset',
+  usageExport: 'usage:export',
 } as const;
 
 export interface ConcealRequest {
@@ -235,14 +246,24 @@ export interface RendererApi {
   };
   live: {
     status(): Promise<LiveTranscriptStatus>;
-    /** Start live transcription of the call audio. `consent` must be true (everyone informed). `diarize` labels speaker turns. */
-    start(consent: boolean, diarize?: boolean): Promise<LiveTranscriptStatus>;
+    /** Start live transcription of the call audio. `consent` must be true (everyone informed). */
+    start(consent: boolean, mode?: SpeakerMode): Promise<LiveTranscriptStatus>;
     stop(): Promise<void>;
+    /** Stop recording without ending the session; resume() continues it. */
+    pause(): Promise<LiveTranscriptStatus>;
+    resume(): Promise<LiveTranscriptStatus>;
+    /** Clear the conversation: restarts the line count and wipes the paired phone (and its backlog). */
+    clear(): Promise<LiveTranscriptStatus>;
+    /** Save Markdown via a native Save dialog. Returns the saved path, or null if cancelled. */
+    exportMarkdown(markdown: string, suggestedName: string): Promise<string | null>;
     onStatus(cb: (s: LiveTranscriptStatus) => void): void;
     onLine(cb: (line: LiveLine) => void): void;
     onError(cb: (message: string) => void): void;
-    /** Ask the AI about one line (identified by `id`). Response streams via the on* callbacks. */
-    ask(id: number, text: string, length: AnswerLength): Promise<void>;
+    /**
+     * Ask the AI about one line or a selection (identified by `id`). `history` carries the earlier
+     * turns of a follow-up thread; mode 'summarize' summarizes instead of answering.
+     */
+    ask(id: number, text: string, length: AnswerLength, opts?: { history?: ChatTurn[]; mode?: AskMode }): Promise<void>;
     cancelAsk(): void;
     onAnswerDelta(cb: (msg: { id: number; chunk: string }) => void): void;
     onAnswerDone(cb: (msg: { id: number; full: string }) => void): void;
@@ -254,6 +275,18 @@ export interface RendererApi {
     /** Starts sharing; returns the status (with QR + fingerprint), or throws with a reason. */
     start(): Promise<CompanionStatus>;
     stop(): Promise<void>;
+    /** Forget paired phones: rotate the remembered token + certificate, so every phone must re-scan. */
+    forget(): Promise<CompanionStatus>;
+  };
+  /** Local-only, privacy-safe usage counters (static action IDs + counts + timestamps). */
+  usage: {
+    /** Best-effort, fire-and-forget. Only the closed set of UsageAction IDs is accepted. */
+    track(action: UsageAction): void;
+    get(): Promise<UsageView>;
+    /** Wipe all counters; returns the (now empty) view. */
+    reset(): Promise<UsageView>;
+    /** Save the counts as JSON via a native dialog; returns the path, or null if cancelled. */
+    export(): Promise<string | null>;
   };
   practice: {
     start(topic: string): Promise<void>;

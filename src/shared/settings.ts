@@ -1,4 +1,5 @@
 import { DEFAULT_AI_MODEL, type AiModel } from './ai';
+import type { SpeakerMode } from './audio';
 import { DEFAULT_KEYMAP, type Keymap } from './keymap';
 
 export const DEFAULT_MONGODB_URI = 'mongodb://127.0.0.1:27017/inviterminal';
@@ -21,6 +22,13 @@ export interface Settings {
   ai: {
     /** Model for the explain/assist features. The API key is NOT here — it lives in the OS keychain. */
     model: AiModel;
+    /**
+     * Auto-explain errors: when a command's output looks like a failure, automatically send the
+     * recent terminal output to the AI for an explanation. OFF by default. Opt-in only; the output
+     * is redacted (secrets masked) in the main process before it leaves the machine, and the panel
+     * makes clear each time that it fired.
+     */
+    autoExplainErrors: boolean;
   };
   stt: {
     /** Path to a whisper.cpp ggml model, or null for the default in the data dir. */
@@ -37,6 +45,14 @@ export interface Settings {
   companion: {
     /** TCP port for "Share to phone". A fixed port lets you keep one firewall rule; 0 = random each time. */
     port: number;
+    /** Keep the pairing between sessions so a paired phone reconnects without re-scanning. */
+    rememberPairing: boolean;
+    /** Start sharing automatically when you start a live transcript or ask the AI. */
+    autoStart: boolean;
+    /** Also send live-transcript lines to the phone (not just answers). */
+    sendTranscript: boolean;
+    /** Answer `inviterminal.local` on the LAN while sharing. */
+    mdns: boolean;
   };
   liveTranscript: {
     /** PipeWire capture source (a monitor), or null to auto-detect the default output's monitor. */
@@ -45,6 +61,8 @@ export interface Settings {
     chunkSeconds: number;
     /** Path to a whisper.cpp tinydiarize model (ggml-small.en-tdrz.bin), or null for the default in the data dir. */
     tdrzModelPath: string | null;
+    /** The speaker mode the Live panel starts with (remembered from the last session). */
+    speakerMode: SpeakerMode;
   };
 }
 
@@ -54,12 +72,12 @@ export const DEFAULT_SETTINGS: Settings = {
   shortcuts: { ...DEFAULT_KEYMAP },
   library: { mongoUri: DEFAULT_MONGODB_URI, allowRemote: false },
   globalShortcut: null,
-  ai: { model: DEFAULT_AI_MODEL },
+  ai: { model: DEFAULT_AI_MODEL, autoExplainErrors: false },
   stt: { modelPath: null, binaryPath: null },
   tts: { binaryPath: null, voice: null },
   // A fixed default so one firewall rule keeps working; the user can change it or set 0 for random.
-  companion: { port: 41830 },
-  liveTranscript: { source: null, chunkSeconds: 6, tdrzModelPath: null },
+  companion: { port: 41830, rememberPairing: true, autoStart: true, sendTranscript: true, mdns: true },
+  liveTranscript: { source: null, chunkSeconds: 6, tdrzModelPath: null, speakerMode: 'off' },
 };
 
 export type SettingsPatch = {

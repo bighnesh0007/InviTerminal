@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ANSWER_LENGTHS, answerParams, answerSystem } from '../src/shared/ai';
+import { ANSWER_LENGTHS, answerParams, answerSystem, askSystem, summarizeSystem } from '../src/shared/ai';
 
 describe('answerParams', () => {
   it('caps tokens and tightens the instruction as length shrinks', () => {
@@ -19,5 +19,14 @@ describe('answerSystem', () => {
   it('embeds the length instruction in the system prompt', () => {
     expect(answerSystem('short')).toContain(answerParams('short').instruction);
     expect(answerSystem('short')).toMatch(/concise|directly/i);
+  });
+});
+
+describe('askSystem', () => {
+  it('summarize mode uses the summary prompt; answer mode the answer prompt', () => {
+    expect(askSystem('summarize', 'medium')).toBe(summarizeSystem('medium'));
+    expect(askSystem('answer', 'short')).toBe(answerSystem('short'));
+    expect(summarizeSystem('detailed')).toMatch(/never invent/i);
+    expect(summarizeSystem('detailed')).toMatch(/action items/i);
   });
 });

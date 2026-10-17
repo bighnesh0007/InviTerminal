@@ -1,5 +1,5 @@
 import type Groq from 'groq-sdk';
-import { type AiModel, AI_MODELS, type AnswerLength, answerParams, answerSystem } from '../../shared/ai';
+import { type AiModel, AI_MODELS, type AnswerLength, answerParams, type AskMode, askSystem, type ChatTurn } from '../../shared/ai';
 
 /**
  * Thin wrapper over groq-sdk (console.groq.com — free, fast inference on open
@@ -67,14 +67,15 @@ export class GroqClient {
     return this.run(opts.model, [{ role: 'system', content: opts.system }, ...opts.messages], onDelta, signal);
   }
 
-  /** Answer a single line (from the live transcript) at the requested length. */
-  async answerStream(opts: { model: AiModel; text: string; length: AnswerLength }, onDelta: (chunk: string) => void, signal?: AbortSignal): Promise<string> {
+  /** Answer (or summarize) live-transcript text at the requested length; `history` continues a follow-up thread. */
+  async answerStream(
+    opts: { model: AiModel; text: string; length: AnswerLength; mode?: AskMode; history?: ChatTurn[] },
+    onDelta: (chunk: string) => void,
+    signal?: AbortSignal,
+  ): Promise<string> {
     return this.run(
       opts.model,
-      [
-        { role: 'system', content: answerSystem(opts.length) },
-        { role: 'user', content: opts.text },
-      ],
+      [{ role: 'system', content: askSystem(opts.mode ?? 'answer', opts.length) }, ...(opts.history ?? []), { role: 'user', content: opts.text }],
       onDelta,
       signal,
       answerParams(opts.length).maxTokens,

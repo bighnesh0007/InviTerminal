@@ -34,8 +34,33 @@ export interface TtsStatus {
   reason: string | null;
 }
 
+/**
+ * How speakers are told apart in the live transcript.
+ * - off:      plain transcript of the call audio.
+ * - turns:    whisper tinydiarize on the call audio (best-effort turn detection).
+ * - you-them: your microphone on the left channel, the call audio on the right, then whisper's
+ *             channel diarization (-di) labels "You" / "Them" — reliable, needs a microphone.
+ * - stereo:   the source's own two channels via -di, for sources that put each speaker on a side.
+ */
+export const SPEAKER_MODES = ['off', 'turns', 'you-them', 'stereo'] as const;
+export type SpeakerMode = (typeof SPEAKER_MODES)[number];
+export const SPEAKER_MODE_LABELS: Record<SpeakerMode, string> = {
+  off: 'Off',
+  turns: 'Turns (best-effort)',
+  'you-them': 'You / Them',
+  stereo: 'Stereo channels',
+};
+
+export interface ModeAvailability {
+  available: boolean;
+  reason: string | null;
+}
+
 export interface LiveTranscriptStatus {
+  /** A session exists (running or paused). */
   active: boolean;
+  /** Session exists but capture is stopped — nothing is being recorded. */
+  paused: boolean;
   /** The capture source being recorded (a PipeWire monitor), or null when idle. */
   source: string | null;
   /** ISO start time, for the elapsed indicator. */
@@ -44,16 +69,19 @@ export interface LiveTranscriptStatus {
   lines: number;
   /** Set when live transcription can't run (e.g. no whisper model). */
   reason: string | null;
-  /** Whether speaker-turn labelling (tinydiarize) is available (the tdrz model is present). */
-  diarizeAvailable: boolean;
-  /** Whether this session is labelling speaker turns. */
-  diarizing: boolean;
+  /** The speaker mode of the current session ('off' when idle). */
+  speakerMode: SpeakerMode;
+  /** Which speaker modes can run on this machine right now. */
+  modes: Record<SpeakerMode, ModeAvailability>;
 }
 
 export interface LiveLine {
   text: string;
   at: string;
-  /** Speaker-turn label (e.g. "Speaker 1") when diarizing; absent otherwise. Turn detection within a chunk, not a persistent identity. */
+  /**
+   * Speaker label when a speaker mode is on: "You"/"Them" (you-them), "Speaker 1"/"Speaker 2"
+   * (turns — within-chunk turn detection, not identity), or "Left"/"Right" (stereo). Absent otherwise.
+   */
   speaker?: string;
 }
 

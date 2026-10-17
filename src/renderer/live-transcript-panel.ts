@@ -1,7 +1,10 @@
-import type { LiveLine, LiveTranscriptStatus } from '../shared/audio';
-import { ANSWER_LENGTHS, ANSWER_LENGTH_LABELS, type AnswerLength, type AiStatus } from '../shared/ai';
+import { ANSWER_LENGTHS, ANSWER_LENGTH_LABELS, type AiStatus, type AnswerLength } from '../shared/ai';
+import { type LiveLine, type LiveTranscriptStatus, SPEAKER_MODE_LABELS, SPEAKER_MODES, type SpeakerMode } from '../shared/audio';
 import type { RendererApi } from '../shared/ipc';
 import { button, el } from './dom';
+import { track } from './usage';
+import { createAnswerHub, type Thread } from './live-answers';
+import { buildTranscriptMarkdown, plainTranscript, shouldMerge } from './live-format';
 
 export interface LiveTranscriptPanelView {
   element: HTMLElement;
@@ -12,258 +15,455 @@ export interface LiveTranscriptPanelView {
   close(): void;
 }
 
+/** One transcript entry (possibly several merged same-speaker lines). */
+export interface Item {
+  id: number;
+  at: string;
+  /** Time of the latest line merged in (merging stops after a pause). */
+  lastAt: string;
+  speaker?: string;
+  text: string;
+  el: HTMLElement;
+  textEl: HTMLElement;
+  speakerEl: HTMLElement | null;
+  pick: HTMLInputElement;
+  slot: HTMLElement;
+  thread?: Thread;
+}
+
+const clean = (m: string) => m.replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+const store = {
+  get(k: string): string | null {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  set(k: string, v: string): void {
+    try {
+      localStorage.setItem(k, v);
+    } catch {
+      /* private mode */
+    }
+  },
+};
+
 /**
- * Live meeting transcript (Phase 1). Captures the call audio playing on this
- * machine, transcribes it locally with whisper, and streams the text here. It is
- * CONSENT-GATED — recording a call records everyone in it — and shows a visible
- * "● Live" indicator while on. Audio never leaves the machine. Behind the gate.
+ * Live transcript. Captures the call audio playing on this machine (plus your microphone in
+ * "You / Them" mode), transcribes it locally with whisper, and streams it here. Consent-gated with
+ * a visible "● Live" indicator; audio never leaves the machine. On top of the transcript:
+ * search, select/edit/merge turns, rename speakers, copy/export, and on-demand AI (per line, per
+ * selection, or "summarize so far") with follow-ups — all manual, never automatic.
  */
 export function mountLiveTranscriptPanel(api: RendererApi, opts: { onOpenChange(open: boolean): void }): LiveTranscriptPanelView {
   const panel = el('aside', { className: 'library live-panel' });
   panel.hidden = true;
-
-  const statusLine = el('p', { className: 'lib-status' });
-  const feed = el('div', { className: 'live-feed' });
   const message = el('p', { className: 'lib-message' });
   const say = (t: string) => (message.textContent = t);
   const badge = el('span', { className: 'rec-badge live-badge' });
   badge.hidden = true;
 
-  let sttReady = false;
-  let active = false;
-  let diarizeAvailable = false;
+  let status: LiveTranscriptStatus | null = null;
   let aiReady = false;
-
-  // ---- Ask AI: length selector + per-line streaming answers --------------------------------
-  let askLength: AnswerLength = readStoredLength();
   let nextId = 1;
-  const asks = new Map<number, { answer: HTMLElement; btn: HTMLButtonElement; started: boolean; busy: boolean }>();
-  // Curate turns, then ask about the selection as one conversation.
-  const selected = new Set<number>();
-  const lineData = new Map<number, LiveLine>();
-  const selectedAnswer = el('div', { className: 'live-answer live-selected-answer' });
-  selectedAnswer.hidden = true;
-  const askSelectedBtn = button('✨ Ask selected', () => askSelected());
-  askSelectedBtn.className = 'live-ask-selected';
+  const items = new Map<number, Item>();
+  let lastItem: Item | null = null;
 
-  function updateSelectedBtn(): void {
-    askSelectedBtn.textContent = selected.size ? `✨ Ask selected (${selected.size})` : '✨ Ask selected';
-    askSelectedBtn.disabled = selected.size === 0 || !aiReady;
-    askSelectedBtn.title = aiReady ? 'Send the ticked turns to the AI as one conversation' : 'Add a key in Settings to use Ask';
+  // ---- speaker names (renames survive sessions: "Them" → "Interviewer") ----------------------
+  const names = new Map<string, string>(Object.entries(JSON.parse(store.get('invi.speakerNames') ?? '{}') as Record<string, string>));
+  const display = (raw?: string) => (raw ? names.get(raw) || raw : '');
+
+  // ---- answer length (remembered per viewer) ---------------------------------------------------
+  let length: AnswerLength = (ANSWER_LENGTHS as readonly string[]).includes(store.get('invi.askLength') ?? '') ? (store.get('invi.askLength') as AnswerLength) : 'short';
+
+  const hub = createAnswerHub(api, { length: () => length, aiReady: () => aiReady, say });
+
+  // ---- setup: consent + speaker mode -------------------------------------------------------
+  const statusLine = el('p', { className: 'lib-status' });
+  const consent = Object.assign(el('input'), { type: 'checkbox' });
+  consent.addEventListener('change', () => setControls());
+  const consentLabel = el('label', { className: 'live-consent' }, consent, el('span', { text: 'Everyone in the call knows it is being transcribed on my machine.' }));
+  const modeSelect = el('select', { className: 'live-mode' });
+  for (const m of SPEAKER_MODES) modeSelect.append(Object.assign(el('option', { text: SPEAKER_MODE_LABELS[m] }), { value: m }));
+  const modeHint = el('span', { className: 'field-note' });
+  modeSelect.addEventListener('change', () => {
+    track(api, 'live.speakerMode');
+    renderModeHint();
+    void api.settings.update({ liveTranscript: { speakerMode: modeSelect.value as SpeakerMode } }).catch(() => undefined);
+  });
+  const modeRow = el('label', { className: 'live-mode-row' }, el('span', { text: 'Speakers:' }), modeSelect, modeHint);
+  const setup = el('div', { className: 'live-setup' }, consentLabel, modeRow);
+
+  const MODE_HELP: Record<SpeakerMode, string> = {
+    off: 'Plain transcript.',
+    turns: 'Guesses speaker changes from the call audio — often misses them.',
+    'you-them': 'Your mic vs the call audio — reliable "You" / "Them" labels.',
+    stereo: 'Uses the source’s left/right channels (only if speakers are on separate sides).',
+  };
+  function renderModeHint(): void {
+    const m = modeSelect.value as SpeakerMode;
+    const a = status?.modes[m];
+    modeHint.textContent = a && !a.available ? ` — unavailable: ${a.reason ?? ''}` : ` — ${MODE_HELP[m]}`;
   }
 
+  // ---- run controls -----------------------------------------------------------------------
+  const startBtn = button('▶ Start', () => start(), say);
+  const pauseBtn = button('⏸ Pause', async () => render(await api.live.pause()), say);
+  const resumeBtn = button('▶ Resume', async () => render(await api.live.resume()), say);
+  const stopBtn = button('■ Stop', async () => {
+    await api.live.stop();
+    say('Stopped. The transcript stays here until you start again — copy or export it first if you need it.');
+  }, say);
+  const runRow = el('div', { className: 'lib-actions' }, startBtn, pauseBtn, resumeBtn, stopBtn);
+
+  // ---- toolbar: search · select · copy · export · summarize --------------------------------
+  const search = Object.assign(el('input', { className: 'live-search' }), { type: 'search', placeholder: 'Search transcript…' });
+  search.addEventListener('input', () => applySearch());
+  const selAll = button('All', () => setPicks(true), say);
+  const selNone = button('None', () => setPicks(false), say);
+  selAll.title = 'Tick every visible turn';
+  selNone.title = 'Untick every visible turn';
+  const copyBtn = button('Copy', async () => {
+    track(api, 'live.copy');
+    await api.clipboard.write(plainTranscript([...items.values()], display));
+    say('Transcript copied.');
+  }, say);
+  const exportBtn = button('Export .md', async () => {
+    track(api, 'live.export');
+    const md = buildTranscriptMarkdown([...items.values()], hub.threads(), display, status?.speakerMode ?? (modeSelect.value as SpeakerMode));
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    const path = await api.live.exportMarkdown(md, `transcript-${stamp}.md`);
+    if (path) say(`Saved ${path}`);
+  }, say);
+  const summarizeBtn = button('✨ Summarize', () => summarize(), say);
+  summarizeBtn.title = 'Summarize the whole conversation so far';
+  // Irreversible, so it asks once: the first click arms it for 3s, the second clears.
+  const clearBtn = el('button', { text: '🗑 Clear', className: 'live-clear' });
+  clearBtn.type = 'button';
+  clearBtn.title = 'Delete the transcript and AI answers here and on the paired phone';
+  let clearArmed: ReturnType<typeof setTimeout> | null = null;
+  const disarm = () => {
+    if (clearArmed) clearTimeout(clearArmed);
+    clearArmed = null;
+    clearBtn.textContent = '🗑 Clear';
+    clearBtn.classList.remove('armed');
+  };
+  clearBtn.addEventListener('click', () => {
+    if (!clearArmed) {
+      clearBtn.textContent = 'Click again to clear';
+      clearBtn.classList.add('armed');
+      clearArmed = setTimeout(disarm, 3000);
+      return;
+    }
+    disarm();
+    void clearConversation().catch((e: Error) => say(clean(e.message)));
+  });
+  const toolbar = el('div', { className: 'live-toolbar' }, search, selAll, selNone, copyBtn, exportBtn, summarizeBtn, clearBtn);
+
+  // ---- speakers row (rename) ----------------------------------------------------------------
+  const speakersRow = el('div', { className: 'live-speakers' });
+  const seenSpeakers = new Set<string>();
+  function noteSpeaker(raw: string): void {
+    if (seenSpeakers.has(raw)) return;
+    seenSpeakers.add(raw);
+    const input = Object.assign(el('input'), { value: names.get(raw) ?? '', placeholder: raw });
+    input.title = `Rename "${raw}"`;
+    input.addEventListener('change', () => {
+      const v = input.value.trim().slice(0, 30);
+      if (v) names.set(raw, v);
+      else names.delete(raw);
+      store.set('invi.speakerNames', JSON.stringify(Object.fromEntries(names)));
+      for (const it of items.values()) if (it.speaker === raw && it.speakerEl) it.speakerEl.textContent = display(raw);
+    });
+    speakersRow.append(el('label', { className: 'live-speaker-name' }, el('span', { text: `${raw} →` }), input));
+    speakersRow.hidden = false;
+  }
+
+  // ---- ask row: length · ask selected · merge ------------------------------------------------
   const lengthButtons = ANSWER_LENGTHS.map((len) => {
-    const b = button(ANSWER_LENGTH_LABELS[len], () => {
-      askLength = len;
-      try {
-        localStorage.setItem('invi.askLength', len);
-      } catch {
-        /* private mode */
-      }
+    const b = el('button', { text: ANSWER_LENGTH_LABELS[len] });
+    b.type = 'button';
+    b.dataset.len = len;
+    b.addEventListener('click', () => {
+      length = len;
+      store.set('invi.askLength', len);
       refreshLength();
     });
-    b.dataset.len = len;
     return b;
   });
-  const lengthRow = el('div', { className: 'live-length' }, el('span', { className: 'field-note', text: 'Answer length:' }), ...lengthButtons);
   function refreshLength(): void {
-    for (const b of lengthButtons) b.classList.toggle('active', b.dataset.len === askLength);
+    for (const b of lengthButtons) b.classList.toggle('active', b.dataset.len === length);
   }
   refreshLength();
+  const askSelectedBtn = button('✨ Ask selected', () => askSelected(), say);
+  askSelectedBtn.className = 'live-ask-selected';
+  const merge = Object.assign(el('input'), { type: 'checkbox', checked: store.get('invi.mergeSpeakers') !== '0' });
+  merge.addEventListener('change', () => store.set('invi.mergeSpeakers', merge.checked ? '1' : '0'));
+  const askRow = el(
+    'div',
+    { className: 'live-length' },
+    el('span', { className: 'field-note', text: 'Answer:' }),
+    ...lengthButtons,
+    askSelectedBtn,
+    el('label', { className: 'live-merge' }, merge, el('span', { text: 'Merge same speaker' })),
+  );
 
-  const consent = Object.assign(el('input'), { type: 'checkbox' });
-  const consentLabel = el('label', { className: 'live-consent' }, consent, el('span', { text: 'Everyone in the call has been told it is being transcribed on my machine.' }));
-  consent.addEventListener('change', () => setControls());
+  const results = el('div', { className: 'live-results' });
+  // Selection answers and summaries collect here; collapsible and height-capped so the transcript stays in view.
+  const resultsCount = el('span', { className: 'field-note' });
+  const resultsToggle = el('button', { text: 'Hide', className: 'thread-btn' });
+  resultsToggle.type = 'button';
+  const resultsHead = el('div', { className: 'live-results-head' }, el('strong', { text: 'AI answers' }), resultsCount, resultsToggle);
+  resultsHead.hidden = true;
+  const showResults = (open: boolean) => {
+    results.hidden = !open;
+    resultsToggle.textContent = open ? 'Hide' : 'Show';
+  };
+  resultsToggle.addEventListener('click', () => showResults(results.hidden !== false));
+  const noteResult = () => {
+    resultsHead.hidden = false;
+    resultsCount.textContent = `(${results.children.length})`;
+    showResults(true);
+    results.scrollTop = 0;
+  };
+  const feed = el('div', { className: 'live-feed' });
+  const empty = el('p', { className: 'live-empty', text: 'Tick consent, pick how to label speakers, and press Start. Play the call through this computer.' });
 
-  const diarize = Object.assign(el('input'), { type: 'checkbox' });
-  const diarizeNote = el('span', { className: 'field-note' });
-  const diarizeLabel = el('label', { className: 'live-consent' }, diarize, el('span', { text: '🗣 Label speaker turns' }), diarizeNote);
-
-  const startBtn = button('Start transcribing', () => start(), say);
-  const stopBtn = button('Stop', () => stop(), say);
+  // ---- behaviour -------------------------------------------------------------------------------
+  function selectedItems(): Item[] {
+    return [...items.values()].filter((i) => i.pick.checked);
+  }
 
   function setControls(): void {
+    const active = !!status?.active;
+    const paused = !!status?.paused;
+    const sttOk = !!status && !status.reason;
+    const modeOk = !!status?.modes[modeSelect.value as SpeakerMode]?.available;
+    setup.hidden = active;
     startBtn.hidden = active;
+    startBtn.disabled = !sttOk || !consent.checked || !modeOk;
+    startBtn.title = !consent.checked ? 'Tick the consent box first' : !modeOk ? 'This speaker mode is unavailable here' : '';
+    pauseBtn.hidden = !active || paused;
+    resumeBtn.hidden = !active || !paused;
     stopBtn.hidden = !active;
-    startBtn.disabled = active || !sttReady || !consent.checked;
-    consent.disabled = active;
-    diarize.disabled = active || !diarizeAvailable;
-    diarizeNote.textContent = diarizeAvailable ? '' : ' — needs the speaker model (Settings → Live transcript)';
-  }
-
-  function line(l: LiveLine): void {
-    const id = nextId++;
-    lineData.set(id, l);
-    const pick = Object.assign(el('input'), { type: 'checkbox' });
-    pick.className = 'live-pick';
-    pick.title = 'Include this turn when you Ask selected';
-    // New turns are selected by default — the user unticks the ones to leave out, then Asks.
-    pick.checked = true;
-    selected.add(id);
-    pick.addEventListener('change', () => {
-      if (pick.checked) selected.add(id);
-      else selected.delete(id);
-      updateSelectedBtn();
-    });
-    const parts: HTMLElement[] = [pick, el('span', { className: 'live-time', text: new Date(l.at).toLocaleTimeString() })];
-    if (l.speaker) parts.push(el('span', { className: 'live-speaker', text: l.speaker }));
-    parts.push(el('span', { className: 'live-text', text: l.text }));
-    const askBtn = button('✨ Ask', () => ask(id, l.text));
-    askBtn.className = 'live-ask';
-    askBtn.disabled = !aiReady;
-    askBtn.title = aiReady ? 'Ask the AI about this line' : `Add a ${'Groq'} key in Settings to use Ask`;
-    parts.push(askBtn);
-    const answer = el('div', { className: 'live-answer' });
-    answer.hidden = true;
-    feed.append(el('div', { className: 'live-item' }, el('div', { className: 'live-line' }, ...parts), answer));
-    asks.set(id, { answer, btn: askBtn, started: false, busy: false });
-    updateSelectedBtn(); // reflect the auto-selected new line in the "Ask selected (N)" count
-    feed.scrollTop = feed.scrollHeight;
-  }
-
-  async function ask(id: number, text: string): Promise<void> {
-    const entry = asks.get(id);
-    if (!entry || entry.busy) return;
-    entry.busy = true;
-    entry.started = false;
-    entry.btn.disabled = true;
-    entry.answer.hidden = false;
-    entry.answer.textContent = '…';
-    try {
-      await api.live.ask(id, text, askLength);
-    } catch (e) {
-      entry.answer.textContent = `Error: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`;
-      entry.busy = false;
-      entry.btn.disabled = !aiReady;
-    }
-  }
-
-  async function askSelected(): Promise<void> {
-    if (selected.size === 0) return;
-    // Combine the ticked turns in the order they appeared (Map preserves insertion order).
-    const combined = [...lineData.entries()]
-      .filter(([id]) => selected.has(id))
-      .map(([, l]) => (l.speaker ? `${l.speaker}: ${l.text}` : l.text))
-      .join('\n')
-      .slice(0, 12_000);
-    if (!combined.trim()) return;
-    const id = nextId++;
-    const entry = { answer: selectedAnswer, btn: askSelectedBtn, started: false, busy: true };
-    asks.set(id, entry);
-    askSelectedBtn.disabled = true;
-    selectedAnswer.hidden = false;
-    selectedAnswer.textContent = '…';
-    try {
-      await api.live.ask(id, combined, askLength);
-    } catch (e) {
-      selectedAnswer.textContent = `Error: ${(e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`;
-      entry.busy = false;
-      updateSelectedBtn();
+    const has = items.size > 0;
+    toolbar.hidden = !has;
+    askRow.hidden = !has;
+    empty.hidden = has;
+    const n = selectedItems().length;
+    askSelectedBtn.textContent = n ? `✨ Ask selected (${n})` : '✨ Ask selected';
+    askSelectedBtn.disabled = n === 0 || !aiReady;
+    askSelectedBtn.title = aiReady ? 'Send the ticked turns to the AI as one conversation' : 'Add a Groq key in Settings to use Ask';
+    summarizeBtn.disabled = !has || !aiReady;
+    for (const it of items.values()) {
+      const ask = it.el.querySelector('.live-ask') as HTMLButtonElement | null;
+      if (ask) ask.disabled = !aiReady;
     }
   }
 
   function render(s: LiveTranscriptStatus): void {
-    active = s.active;
-    diarizeAvailable = s.diarizeAvailable;
+    status = s;
     badge.hidden = !s.active;
-    badge.textContent = `● Live · ${s.lines} line${s.lines === 1 ? '' : 's'}`;
+    badge.textContent = s.paused ? `⏸ ${s.lines}` : `● Live ${s.lines}`;
+    badge.title = s.paused ? `Live transcript paused · ${s.lines} lines` : `Live transcript · ${s.lines} lines`;
+    badge.classList.toggle('paused', s.paused);
     if (s.reason && !s.active) statusLine.textContent = `Not ready — ${s.reason}`;
-    else if (s.active) statusLine.textContent = `Transcribing ${s.source ?? 'system audio'} locally…`;
-    else statusLine.textContent = sttReady ? 'Ready. Transcription runs on your machine; audio is never uploaded.' : 'Waiting for the local speech-to-text model…';
+    else if (s.paused) statusLine.textContent = 'Paused — nothing is being recorded. Resume to continue.';
+    else if (s.active) statusLine.textContent = `Transcribing locally · ${SPEAKER_MODE_LABELS[s.speakerMode]}`;
+    else statusLine.textContent = 'Ready. Transcription runs on your machine; audio is never uploaded.';
     statusLine.dataset.state = s.reason && !s.active ? 'unavailable' : 'ready';
+    for (const opt of modeSelect.options) {
+      const a = s.modes[opt.value as SpeakerMode];
+      opt.disabled = !a?.available;
+      opt.title = a?.available ? '' : (a?.reason ?? '');
+    }
+    renderModeHint();
     setControls();
   }
 
-  async function start(): Promise<void> {
-    say('');
+  /** Forget everything on screen (transcript, answers, selection, search) — not the session itself. */
+  function wipe(): void {
     feed.replaceChildren();
-    asks.clear();
-    selected.clear();
-    lineData.clear();
-    selectedAnswer.hidden = true;
-    selectedAnswer.textContent = '';
-    updateSelectedBtn();
+    results.replaceChildren();
+    resultsHead.hidden = true;
+    items.clear();
+    lastItem = null;
+    hub.reset();
+    search.value = '';
+  }
+
+  async function clearConversation(): Promise<void> {
+    track(api, 'live.clear');
+    wipe();
+    render(await api.live.clear());
+    say(status?.active ? 'Cleared here and on the phone. New speech keeps appearing below.' : 'Cleared here and on the phone.');
+  }
+
+  async function start(): Promise<void> {
+    track(api, 'live.start');
+    say('');
+    wipe();
     try {
-      render(await api.live.start(consent.checked, diarize.checked));
-      say('Transcribing. Play the call through your speakers; text appears below.');
+      render(await api.live.start(consent.checked, modeSelect.value as SpeakerMode));
+      say('Transcribing. New turns are ticked automatically — untick any you want to leave out, then Ask.');
     } catch (e) {
-      say((e as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+      say(clean((e as Error).message));
+      setControls();
     }
   }
 
-  async function stop(): Promise<void> {
-    await api.live.stop();
-    say('Stopped.');
+  function addLine(l: LiveLine): void {
+    if (lastItem && merge.checked && shouldMerge(lastItem, l)) {
+      lastItem.text = `${lastItem.text} ${l.text}`;
+      lastItem.lastAt = l.at;
+      lastItem.textEl.textContent = lastItem.text;
+      applySearch(lastItem);
+      feed.scrollTop = feed.scrollHeight;
+      return;
+    }
+    const id = nextId++;
+    const pick = Object.assign(el('input'), { type: 'checkbox', checked: true, className: 'live-pick', title: 'Include this turn in Ask selected' });
+    pick.addEventListener('change', () => setControls());
+    const textEl = el('span', { className: 'live-text', text: l.text });
+    const speakerEl = l.speaker ? el('span', { className: 'live-speaker', text: display(l.speaker) }) : null;
+    if (l.speaker) noteSpeaker(l.speaker);
+    const editBtn = el('button', { text: '✎', className: 'live-edit' });
+    editBtn.type = 'button';
+    editBtn.title = 'Edit this line (fix a transcription mistake)';
+    const askBtn = el('button', { text: '✨ Ask', className: 'live-ask' });
+    askBtn.type = 'button';
+    askBtn.disabled = !aiReady;
+    const slot = el('div', { className: 'live-slot' });
+    const row = el('div', { className: 'live-line' }, pick, el('span', { className: 'live-time', text: new Date(l.at).toLocaleTimeString() }), ...(speakerEl ? [speakerEl] : []), textEl, editBtn, askBtn);
+    const itemEl = el('div', { className: 'live-item' }, row, slot);
+    const item: Item = { id, at: l.at, lastAt: l.at, text: l.text, el: itemEl, textEl, speakerEl, pick, slot, ...(l.speaker ? { speaker: l.speaker } : {}) };
+    editBtn.addEventListener('click', () => editLine(item));
+    askBtn.addEventListener('click', () => {
+      track(api, 'live.ask');
+      if (item.thread) (item.thread.el.querySelector('.thread-follow') as HTMLInputElement | null)?.focus();
+      else item.thread = hub.open(item.slot, { label: 'Answer', question: item.text });
+    });
+    items.set(id, item);
+    lastItem = item;
+    feed.append(itemEl);
+    applySearch(item);
+    setControls();
+    if (!search.value) feed.scrollTop = feed.scrollHeight;
   }
 
+  function editLine(item: Item): void {
+    const before = item.text;
+    item.textEl.contentEditable = 'true';
+    item.textEl.classList.add('editing');
+    item.textEl.focus();
+    const range = document.createRange();
+    range.selectNodeContents(item.textEl);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    const finish = (save: boolean) => {
+      item.textEl.contentEditable = 'false';
+      item.textEl.classList.remove('editing');
+      const v = (item.textEl.textContent ?? '').replace(/\s+/g, ' ').trim();
+      item.text = save && v ? v : before;
+      item.textEl.textContent = item.text;
+      item.textEl.removeEventListener('keydown', onKey);
+      item.textEl.removeEventListener('blur', onBlur);
+      // Editing a line stops merging into it, so later speech isn't glued onto a corrected sentence.
+      if (lastItem === item) lastItem = null;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        finish(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        finish(false);
+      }
+      e.stopPropagation(); // never let these keys reach the terminal shortcuts
+    };
+    const onBlur = () => finish(true);
+    item.textEl.addEventListener('keydown', onKey);
+    item.textEl.addEventListener('blur', onBlur);
+  }
+
+  function applySearch(only?: Item): void {
+    const q = search.value.trim().toLowerCase();
+    const list = only ? [only] : [...items.values()];
+    for (const it of list) {
+      const hit = !q || it.text.toLowerCase().includes(q) || display(it.speaker).toLowerCase().includes(q);
+      it.el.hidden = !hit;
+      it.el.classList.toggle('match', !!q && hit);
+    }
+    if (!only && q) say(`${[...items.values()].filter((i) => !i.el.hidden).length} matching turn(s).`);
+  }
+
+  function setPicks(on: boolean): void {
+    for (const it of items.values()) if (!it.el.hidden) it.pick.checked = on;
+    setControls();
+  }
+
+  function asConversation(list: Item[]): string {
+    return list.map((i) => (i.speaker ? `${display(i.speaker)}: ${i.text}` : i.text)).join('\n');
+  }
+
+  function askSelected(): void {
+    const list = selectedItems();
+    if (!list.length) return;
+    track(api, 'live.askSelected');
+    hub.open(results, { label: `Selection · ${list.length} turn${list.length === 1 ? '' : 's'}`, question: asConversation(list).slice(0, 15_000), prepend: true });
+    noteResult();
+  }
+
+  function summarize(): void {
+    const list = [...items.values()];
+    if (!list.length) return;
+    track(api, 'live.summarize');
+    // Long meetings: keep the most recent part that fits (the request is capped at 16k chars).
+    let text = asConversation(list);
+    if (text.length > 15_000) text = `…${text.slice(-15_000)}`;
+    hub.open(results, { label: 'Summary so far', question: text, mode: 'summarize', prepend: true });
+    noteResult();
+  }
+
+  // ---- wiring ---------------------------------------------------------------------------------
   api.live.onStatus(render);
-  api.live.onLine(line);
-  api.live.onError((m) => say(`Error: ${m.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`));
-  api.live.onAnswerDelta(({ id, chunk }) => {
-    const entry = asks.get(id);
-    if (!entry) return;
-    if (!entry.started) {
-      entry.answer.textContent = '';
-      entry.started = true;
-    }
-    entry.answer.textContent += chunk;
-    feed.scrollTop = feed.scrollHeight;
-  });
-  const reenable = (btn: HTMLButtonElement) => {
-    if (btn === askSelectedBtn) updateSelectedBtn();
-    else btn.disabled = !aiReady;
-  };
-  api.live.onAnswerDone(({ id }) => {
-    const entry = asks.get(id);
-    if (!entry) return;
-    entry.busy = false;
-    reenable(entry.btn);
-  });
-  api.live.onAnswerError(({ id, message }) => {
-    const entry = asks.get(id);
-    if (!entry) return;
-    entry.answer.textContent = `Error: ${message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`;
-    entry.busy = false;
-    reenable(entry.btn);
-  });
-  void api.live.status().then((s) => {
-    sttReady = !s.reason;
-    render(s);
-  });
-
+  api.live.onLine(addLine);
+  api.live.onError((m) => say(`Error: ${clean(m)}`));
+  void api.live.status().then(render);
+  void api.settings
+    .get()
+    .then((v) => {
+      modeSelect.value = v.effective.liveTranscript.speakerMode;
+      renderModeHint();
+      setControls();
+    })
+    .catch(() => undefined);
   const renderAi = (s: AiStatus) => {
     aiReady = s.key.present;
-    for (const e of asks.values()) if (e.btn !== askSelectedBtn) e.btn.disabled = e.busy || !aiReady;
-    updateSelectedBtn();
+    hub.refresh();
+    setControls();
   };
   void api.ai.status().then(renderAi);
   api.ai.onStatus(renderAi);
 
+  speakersRow.hidden = true;
   panel.append(
     el('div', { className: 'lib-head' }, el('strong', { text: 'Live transcript' }), button('Close', () => close())),
-    el('p', { className: 'field-note', text: 'Transcribes the call/meeting audio playing on this computer, locally, and shows it here. Off by default; a visible "● Live" indicator shows while on. Audio stays on your machine.' }),
     statusLine,
-    consentLabel,
-    diarizeLabel,
-    el('div', { className: 'lib-actions' }, startBtn, stopBtn),
-    lengthRow,
-    el('div', { className: 'live-select-row' }, el('span', { className: 'field-note', text: 'Tick turns, then:' }), askSelectedBtn),
-    selectedAnswer,
+    setup,
+    runRow,
+    toolbar,
+    speakersRow,
+    askRow,
+    resultsHead,
+    results,
     feed,
+    empty,
     message,
   );
   setControls();
-  updateSelectedBtn();
-
-  function readStoredLength(): AnswerLength {
-    try {
-      const v = localStorage.getItem('invi.askLength');
-      if (v && (ANSWER_LENGTHS as readonly string[]).includes(v)) return v as AnswerLength;
-    } catch {
-      /* private mode */
-    }
-    return 'short';
-  }
 
   function close(): void {
     if (panel.hidden) return;

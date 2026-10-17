@@ -35,13 +35,37 @@ export function answerParams(length: AnswerLength): { instruction: string; maxTo
   }
 }
 
+/** 'answer' responds to a line/selection; 'summarize' summarizes the conversation it is given. */
+export const ASK_MODES = ['answer', 'summarize'] as const;
+export type AskMode = (typeof ASK_MODES)[number];
+
+/** One earlier turn of a follow-up thread. */
+export interface ChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 /** System prompt for answering a line pulled from a live conversation transcript. */
 export function answerSystem(length: AnswerLength): string {
   return (
     'You are a concise assistant. The user gives you a line from a live conversation — usually a question or a prompt. ' +
-    'Respond directly and helpfully, as if helping the user think it through. ' +
+    'Respond directly and helpfully, as if helping the user think it through. Follow-up messages continue the same thread. ' +
     answerParams(length).instruction
   );
+}
+
+/** System prompt for "Summarize so far": key points, decisions and open questions of a transcript. */
+export function summarizeSystem(length: AnswerLength): string {
+  const shape: Record<AnswerLength, string> = {
+    short: 'Give a 2–3 sentence summary.',
+    medium: 'Give a short summary, then the key points as a few bullets.',
+    detailed: 'Give a summary, the key points, any decisions or action items, and open questions — as tidy bullets.',
+  };
+  return 'You summarize conversation transcripts (lines may be prefixed with a speaker label). Be faithful — never invent content. ' + shape[length];
+}
+
+export function askSystem(mode: AskMode, length: AnswerLength): string {
+  return mode === 'summarize' ? summarizeSystem(length) : answerSystem(length);
 }
 
 export type KeySource = 'env' | 'keychain' | 'none';

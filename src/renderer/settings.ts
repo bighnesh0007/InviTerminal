@@ -2,6 +2,7 @@ import type { RendererApi } from '../shared/ipc';
 import { APP_ACTIONS, canonicalChord, chordFromEvent, keymapProblems, type AppAction, type Keymap } from '../shared/keymap';
 import { AI_MODEL_LABELS, AI_MODELS, AI_PROVIDER, type AiStatus } from '../shared/ai';
 import type { SettingsPatch, SettingsView } from '../shared/settings';
+import type { UsageView } from '../shared/usage';
 import { button, el } from './dom';
 
 export interface SettingsPanel {
@@ -50,6 +51,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   const apiKey = Object.assign(el('input'), { type: 'password', autocomplete: 'off', placeholder: 'gsk_…' });
   apiKey.spellcheck = false;
   const aiKeyStatus = el('span', { className: 'field-note' });
+  const autoExplain = Object.assign(el('input'), { type: 'checkbox' });
   const sttModel = el('input');
   sttModel.spellcheck = false;
   sttModel.placeholder = 'default: <data dir>/models/ggml-base.en.bin';
@@ -62,6 +64,18 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   ttsVoice.placeholder = 'voice/language, e.g. en (empty = engine default)';
   const ttsStatus = el('span', { className: 'field-note' });
   const companionPort = Object.assign(el('input'), { type: 'number', min: '0', max: '65535' });
+  const shareChecks = {
+    rememberPairing: Object.assign(el('input'), { type: 'checkbox' }),
+    autoStart: Object.assign(el('input'), { type: 'checkbox' }),
+    sendTranscript: Object.assign(el('input'), { type: 'checkbox' }),
+    mdns: Object.assign(el('input'), { type: 'checkbox' }),
+  };
+  const SHARE_LABELS: Record<keyof typeof shareChecks, string> = {
+    rememberPairing: 'Remember pairing (a phone that scanned once reconnects by itself)',
+    autoStart: 'Start sharing automatically when I start Live or ask the AI',
+    sendTranscript: 'Also send the live transcript to the phone',
+    mdns: 'Answer inviterminal.local on my network',
+  };
   const liveSource = el('input');
   liveSource.spellcheck = false;
   liveSource.placeholder = 'default: your output device’s monitor';
@@ -69,6 +83,56 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   const liveTdrz = el('input');
   liveTdrz.spellcheck = false;
   liveTdrz.placeholder = 'default: <data dir>/models/ggml-small.en-tdrz.bin';
+
+  // ---- Usage (local-only) --------------------------------------------------------------
+  const usageTotal = el('p', { className: 'field-note' });
+  const usageTable = el('table', { className: 'usage-table' });
+  let usageArmed: ReturnType<typeof setTimeout> | null = null;
+  const usageResetBtn = button('Reset counts', () => armOrResetUsage(), (m) => say(m));
+  const usageExportBtn = button('Export JSON', async () => {
+    const path = await api.usage.export();
+    say(path ? `Usage counts saved to ${path}.` : 'Export cancelled.');
+  }, (m) => say(m));
+  const usageRefreshBtn = button('Refresh', () => loadUsage(), (m) => say(m));
+
+  function renderUsage(v: UsageView): void {
+    usageTotal.textContent = v.loadWarning ? v.loadWarning : `${v.total} tracked action${v.total === 1 ? '' : 's'} recorded on this machine. Nothing here is sent anywhere.`;
+    const header = el('tr', {}, el('th', { text: 'Action' }), el('th', { text: 'Count' }), el('th', { text: 'Last used' }));
+    const rows = v.rows.map((r) =>
+      el(
+        'tr',
+        { className: r.count === 0 ? 'usage-unused' : '' },
+        el('td', { text: r.label }),
+        el('td', { className: 'usage-count', text: String(r.count) }),
+        el('td', { className: 'usage-when', text: r.lastUsed ? new Date(r.lastUsed).toLocaleString() : '—' }),
+      ),
+    );
+    usageTable.replaceChildren(header, ...rows);
+  }
+
+  async function loadUsage(): Promise<void> {
+    renderUsage(await api.usage.get());
+  }
+
+  function disarmUsage(): void {
+    if (usageArmed) clearTimeout(usageArmed);
+    usageArmed = null;
+    usageResetBtn.textContent = 'Reset counts';
+    usageResetBtn.classList.remove('armed');
+  }
+
+  // Reset is irreversible, so it asks once: first click arms for 3s, second click wipes.
+  async function armOrResetUsage(): Promise<void> {
+    if (!usageArmed) {
+      usageResetBtn.textContent = 'Click again to reset';
+      usageResetBtn.classList.add('armed');
+      usageArmed = setTimeout(disarmUsage, 3000);
+      return;
+    }
+    disarmUsage();
+    renderUsage(await api.usage.reset());
+    say('Usage counts reset.');
+  }
 
   const field = (label: string, input: HTMLElement, note?: HTMLElement) => el('label', { className: 'lib-field' }, el('span', { text: label }), input, ...(note ? [note] : []));
 
@@ -125,6 +189,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     globalShortcut.value = s.globalShortcut ?? '';
     aiModel.value = s.ai.model;
     aiModel.disabled = view.overriddenByEnv.includes('ai.model');
+    autoExplain.checked = s.ai.autoExplainErrors;
     renderAiStatus(await api.ai.status());
     for (const a of APP_ACTIONS) chordInputs[a].value = canonicalChord(s.shortcuts[a]) ?? s.shortcuts[a];
     sttModel.value = s.stt.modelPath ?? '';
@@ -137,6 +202,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
       ttsStatus.textContent = st.available ? `Text-to-speech ready — ${st.binary}${st.voice ? `, voice ${st.voice}` : ''}` : `Not ready — ${st.reason}`;
     });
     companionPort.value = String(s.companion.port);
+    for (const k of Object.keys(shareChecks) as (keyof typeof shareChecks)[]) shareChecks[k].checked = s.companion[k];
     companionPort.disabled = view.overriddenByEnv.includes('companion.port');
     liveSource.value = s.liveTranscript.source ?? '';
     liveChunk.value = String(s.liveTranscript.chunkSeconds);
@@ -147,6 +213,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     }
     renderBanner();
     validateChords();
+    void loadUsage().catch(() => undefined);
   }
 
   function renderAiStatus(st: AiStatus): void {
@@ -191,6 +258,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     const gs = globalShortcut.value.trim() || null;
     if (!view.overriddenByEnv.includes('globalShortcut') && gs !== s.globalShortcut) patch.globalShortcut = gs;
     if (aiModel.value !== s.ai.model) patch.ai = { model: aiModel.value as (typeof AI_MODELS)[number] };
+    if (autoExplain.checked !== s.ai.autoExplainErrors) patch.ai = { ...patch.ai, autoExplainErrors: autoExplain.checked };
     const sm = sttModel.value.trim() || null;
     if (sm !== s.stt.modelPath) patch.stt = { modelPath: sm };
     const tb = ttsBinary.value.trim() || null;
@@ -199,6 +267,9 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     if (tv !== s.tts.voice) patch.tts = { ...patch.tts, voice: tv };
     const cp = Number(companionPort.value);
     if (!view.overriddenByEnv.includes('companion.port') && cp !== s.companion.port) patch.companion = { port: cp };
+    for (const k of Object.keys(shareChecks) as (keyof typeof shareChecks)[]) {
+      if (shareChecks[k].checked !== s.companion[k]) patch.companion = { ...patch.companion, [k]: shareChecks[k].checked };
+    }
     const ls = liveSource.value.trim() || null;
     if (ls !== s.liveTranscript.source) patch.liveTranscript = { ...patch.liveTranscript, source: ls };
     const lc = Number(liveChunk.value);
@@ -252,6 +323,8 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
       }, say),
     ),
     el('span', { className: 'field-note', text: `The key is stored encrypted in your OS keychain, never in settings.json, and is sent only to ${AI_PROVIDER} when you use the AI features. Get a free key at console.groq.com.` }),
+    el('label', { className: 'lib-trash' }, autoExplain, el('span', { text: 'Auto-explain errors in the terminal (off by default)' })),
+    el('span', { className: 'field-note', text: `When a command's output looks like a failure (e.g. "command not found", a stack trace), the recent terminal output is sent to ${AI_PROVIDER} automatically and the explanation opens in the Explain panel, marked AUTO. Secrets are masked before sending. Only the tab you're viewing triggers it, at most once every few seconds. Your commands still run exactly as normal.` }),
     el('h3', { text: 'Speech-to-text (local whisper.cpp)' }),
     field('Whisper model path', sttModel, sttStatus),
     el('span', { className: 'field-note', text: 'Transcription runs on your machine with whisper-cli; audio is never uploaded. Download a ggml model (e.g. ggml-base.en.bin) and point this at it.' }),
@@ -261,6 +334,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     el('span', { className: 'field-note', text: 'The interviewer can read questions aloud (toggle it on in the Practice panel). Speech is generated on your machine — install espeak-ng (e.g. "sudo pacman -S espeak-ng"), or point this at another engine that accepts [-v VOICE] followed by the text.' }),
     el('h3', { text: 'Share to phone' }),
     field('Port', companionPort),
+    ...(Object.keys(shareChecks) as (keyof typeof shareChecks)[]).map((k) => el('label', { className: 'lib-trash' }, shareChecks[k], el('span', { text: SHARE_LABELS[k] }))),
     el('span', { className: 'field-note', text: 'The LAN port your phone connects to. A fixed port means you add a firewall rule only once; set it to 0 for a random port each time. If your phone can’t connect, the exact firewall command is shown in the Share panel while sharing.' }),
     el('h3', { text: 'Live transcript (local)' }),
     field('Capture source', liveSource),
@@ -268,6 +342,11 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     field('Speaker-turn model (tinydiarize)', liveTdrz),
     el('span', { className: 'field-note', text: 'Transcribes the meeting audio playing on this machine, locally. For speaker-turn labels, download the whisper tinydiarize model (~465MB) into <data dir>/models/: curl -L -o ~/.config/inviterminal/models/ggml-small.en-tdrz.bin https://huggingface.co/akashmjn/tinydiarize-whisper.cpp/resolve/main/ggml-small.en-tdrz.bin' }),
     el('div', { className: 'lib-actions' }, button('Save', save, say), button('Revert', () => load(), say)),
+    el('h3', { text: 'Usage (local only)' }),
+    usageTotal,
+    el('span', { className: 'field-note', text: 'Counts of which features you use, kept only on this machine (never sent to the phone, MongoDB, or any AI provider). It stores action names, counts and times — never your commands, transcripts, prompts or answers.' }),
+    usageTable,
+    el('div', { className: 'lib-actions' }, usageRefreshBtn, usageExportBtn, usageResetBtn),
     message,
   );
 

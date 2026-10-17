@@ -1,6 +1,8 @@
 import type { RendererApi, ShellProfileInfo } from '../shared/ipc';
 import { button, el } from './dom';
 import { mountTerminal, type TerminalOptions, type TerminalView } from './terminal';
+import { createErrorWatcher, type ErrorWatcher } from './error-detect';
+import { track } from './usage';
 
 interface Tab {
   id: number;
@@ -8,6 +10,7 @@ interface Tab {
   host: HTMLDivElement;
   label: HTMLSpanElement;
   tabEl: HTMLDivElement;
+  watcher: ErrorWatcher;
 }
 
 export interface TabsView {
@@ -27,7 +30,17 @@ export interface TabsView {
  * receiving output; they are re-fitted when shown. Closing the last tab opens
  * a fresh one, so there is always a shell.
  */
-export function mountTabs(container: HTMLElement, api: RendererApi, opts: { inputAllowed(): boolean; onBlockedInput(): void; terminalOptions(): TerminalOptions }): TabsView {
+export function mountTabs(
+  container: HTMLElement,
+  api: RendererApi,
+  opts: {
+    inputAllowed(): boolean;
+    onBlockedInput(): void;
+    terminalOptions(): TerminalOptions;
+    /** A likely command failure was seen in the ACTIVE tab's output; `recent` is the context. */
+    onErrorDetected?(recent: string): boolean;
+  },
+): TabsView {
   const tabs: Tab[] = [];
   let activeId = -1;
   let nextId = 1;
@@ -35,7 +48,16 @@ export function mountTabs(container: HTMLElement, api: RendererApi, opts: { inpu
   const list = el('div', { className: 'tab-list' });
   const profileSelect = el('select', { className: 'tab-profile' });
   profileSelect.title = 'Shell for new tabs';
-  const bar = el('div', { className: 'tab-bar' }, list, button('+', () => newTab(profileSelect.value || undefined)), profileSelect);
+  const bar = el(
+    'div',
+    { className: 'tab-bar' },
+    list,
+    button('+', () => {
+      track(api, 'terminal.newTab');
+      newTab(profileSelect.value || undefined);
+    }),
+    profileSelect,
+  );
 
   async function refreshProfiles(): Promise<void> {
     const profiles: ShellProfileInfo[] = await api.terminal.profiles();
@@ -69,8 +91,11 @@ export function mountTabs(container: HTMLElement, api: RendererApi, opts: { inpu
     const tabEl = el('div', { className: 'tab' }, label, close);
     tabEl.dataset.tabId = String(id);
     list.append(tabEl);
+    // Per-tab: each shell has its own output buffer. Only the tab you're looking at may trigger.
+    const watcher = createErrorWatcher((recent) => (activeId === id ? (opts.onErrorDetected?.(recent) ?? false) : false));
     const view = mountTerminal(host, api, {
       ...opts.terminalOptions(),
+      onOutput: (data) => watcher.feed(data),
       ...(profileId ? { profileId } : {}),
       inputAllowed: opts.inputAllowed,
       onBlockedInput: opts.onBlockedInput,
@@ -80,13 +105,16 @@ export function mountTabs(container: HTMLElement, api: RendererApi, opts: { inpu
       },
       onExit: () => tabEl.classList.add('exited'),
     });
-    const tab: Tab = { id, view, host, label, tabEl };
+    const tab: Tab = { id, view, host, label, tabEl, watcher };
     tabs.push(tab);
     tabEl.addEventListener('mousedown', (e) => {
       if (e.target === close) return;
       activate(id);
     });
-    close.addEventListener('click', () => closeTab(id));
+    close.addEventListener('click', () => {
+      track(api, 'terminal.closeTab');
+      closeTab(id);
+    });
     activate(id);
   }
 
@@ -94,6 +122,7 @@ export function mountTabs(container: HTMLElement, api: RendererApi, opts: { inpu
     const i = tabs.findIndex((t) => t.id === id);
     if (i < 0) return;
     const [t] = tabs.splice(i, 1);
+    t!.watcher.reset();
     t!.view.dispose();
     t!.host.remove();
     t!.tabEl.remove();

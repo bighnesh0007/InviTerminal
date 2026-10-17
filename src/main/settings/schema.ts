@@ -42,7 +42,10 @@ export const SettingsSchema = z
     ai: z
       // A model ID that was removed from Groq (e.g. the retired Llama 3.x) falls back to the
       // default instead of invalidating the whole settings file.
-      .object({ model: z.enum(AI_MODELS).catch(d.ai.model).default(d.ai.model) })
+      .object({
+        model: z.enum(AI_MODELS).catch(d.ai.model).default(d.ai.model),
+        autoExplainErrors: z.boolean().default(d.ai.autoExplainErrors),
+      })
       .strict()
       .prefault({}),
     stt: z
@@ -94,7 +97,7 @@ export const SettingsPatchSchema = z
     shortcuts: z.object(Object.fromEntries(APP_ACTIONS.map((a) => [a, z.string().max(40)])) as Record<keyof Keymap, z.ZodString>).partial().strict().optional(),
     library: z.object({ mongoUri: z.string().max(2000), allowRemote: z.boolean() }).partial().strict().optional(),
     globalShortcut: z.string().max(60).nullable().optional(),
-    ai: z.object({ model: z.enum(AI_MODELS) }).partial().strict().optional(),
+    ai: z.object({ model: z.enum(AI_MODELS), autoExplainErrors: z.boolean() }).partial().strict().optional(),
     stt: z.object({ modelPath: z.string().max(4096).nullable(), binaryPath: z.string().max(4096).nullable() }).partial().strict().optional(),
     tts: z.object({ binaryPath: z.string().max(4096).nullable(), voice: z.string().max(64).nullable() }).partial().strict().optional(),
     companion: z.object({ port: z.number().int().min(0).max(65535).refine((p) => p === 0 || p >= 1024, 'use 0 (random) or a port between 1024 and 65535'), rememberPairing: z.boolean(), autoStart: z.boolean(), sendTranscript: z.boolean(), mdns: z.boolean() }).partial().strict().optional(),

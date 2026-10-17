@@ -22,6 +22,13 @@ export interface Settings {
   ai: {
     /** Model for the explain/assist features. The API key is NOT here — it lives in the OS keychain. */
     model: AiModel;
+    /**
+     * Auto-explain errors: when a command's output looks like a failure, automatically send the
+     * recent terminal output to the AI for an explanation. OFF by default. Opt-in only; the output
+     * is redacted (secrets masked) in the main process before it leaves the machine, and the panel
+     * makes clear each time that it fired.
+     */
+    autoExplainErrors: boolean;
   };
   stt: {
     /** Path to a whisper.cpp ggml model, or null for the default in the data dir. */
@@ -65,7 +72,7 @@ export const DEFAULT_SETTINGS: Settings = {
   shortcuts: { ...DEFAULT_KEYMAP },
   library: { mongoUri: DEFAULT_MONGODB_URI, allowRemote: false },
   globalShortcut: null,
-  ai: { model: DEFAULT_AI_MODEL },
+  ai: { model: DEFAULT_AI_MODEL, autoExplainErrors: false },
   stt: { modelPath: null, binaryPath: null },
   tts: { binaryPath: null, voice: null },
   // A fixed default so one firewall rule keeps working; the user can change it or set 0 for random.

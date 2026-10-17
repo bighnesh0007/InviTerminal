@@ -25,6 +25,7 @@ export const USAGE_ACTIONS = [
   'terminal.prevTab',
   // AI.
   'ai.explain',
+  'ai.autoExplain',
   // Live transcript.
   'live.start',
   'live.ask',
@@ -67,6 +68,7 @@ export const USAGE_ACTION_LABELS: Record<UsageAction, string> = {
   'terminal.nextTab': 'Next tab',
   'terminal.prevTab': 'Previous tab',
   'ai.explain': 'Explain output with AI',
+  'ai.autoExplain': 'Auto-explain detected error',
   'live.start': 'Start live transcript',
   'live.ask': 'Ask AI about a line',
   'live.askSelected': 'Ask AI about selected lines',

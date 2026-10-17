@@ -51,6 +51,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
   const apiKey = Object.assign(el('input'), { type: 'password', autocomplete: 'off', placeholder: 'gsk_…' });
   apiKey.spellcheck = false;
   const aiKeyStatus = el('span', { className: 'field-note' });
+  const autoExplain = Object.assign(el('input'), { type: 'checkbox' });
   const sttModel = el('input');
   sttModel.spellcheck = false;
   sttModel.placeholder = 'default: <data dir>/models/ggml-base.en.bin';
@@ -188,6 +189,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     globalShortcut.value = s.globalShortcut ?? '';
     aiModel.value = s.ai.model;
     aiModel.disabled = view.overriddenByEnv.includes('ai.model');
+    autoExplain.checked = s.ai.autoExplainErrors;
     renderAiStatus(await api.ai.status());
     for (const a of APP_ACTIONS) chordInputs[a].value = canonicalChord(s.shortcuts[a]) ?? s.shortcuts[a];
     sttModel.value = s.stt.modelPath ?? '';
@@ -256,6 +258,7 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
     const gs = globalShortcut.value.trim() || null;
     if (!view.overriddenByEnv.includes('globalShortcut') && gs !== s.globalShortcut) patch.globalShortcut = gs;
     if (aiModel.value !== s.ai.model) patch.ai = { model: aiModel.value as (typeof AI_MODELS)[number] };
+    if (autoExplain.checked !== s.ai.autoExplainErrors) patch.ai = { ...patch.ai, autoExplainErrors: autoExplain.checked };
     const sm = sttModel.value.trim() || null;
     if (sm !== s.stt.modelPath) patch.stt = { modelPath: sm };
     const tb = ttsBinary.value.trim() || null;
@@ -320,6 +323,8 @@ export function mountSettings(api: RendererApi, opts: { onOpenChange(open: boole
       }, say),
     ),
     el('span', { className: 'field-note', text: `The key is stored encrypted in your OS keychain, never in settings.json, and is sent only to ${AI_PROVIDER} when you use the AI features. Get a free key at console.groq.com.` }),
+    el('label', { className: 'lib-trash' }, autoExplain, el('span', { text: 'Auto-explain errors in the terminal (off by default)' })),
+    el('span', { className: 'field-note', text: `When a command's output looks like a failure (e.g. "command not found", a stack trace), the recent terminal output is sent to ${AI_PROVIDER} automatically and the explanation opens in the Explain panel, marked AUTO. Secrets are masked before sending. Only the tab you're viewing triggers it, at most once every few seconds. Your commands still run exactly as normal.` }),
     el('h3', { text: 'Speech-to-text (local whisper.cpp)' }),
     field('Whisper model path', sttModel, sttStatus),
     el('span', { className: 'field-note', text: 'Transcription runs on your machine with whisper-cli; audio is never uploaded. Download a ggml model (e.g. ggml-base.en.bin) and point this at it.' }),

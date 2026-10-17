@@ -212,3 +212,13 @@ textarea { font-family: ui-monospace, monospace; resize: vertical; width: 100%; 
 .usage-table .usage-count { text-align: right; font-variant-numeric: tabular-nums; }
 .usage-table .usage-when { color: var(--muted); white-space: nowrap; }
 .usage-table tr.usage-unused td { opacity: 0.5; }
+
+/* Auto-explain errors: always-visible marker that output was sent without a click. */
+.ai-auto-note {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-left: 3px solid var(--warn, #d9a441);
+  background: rgba(217, 164, 65, 0.1);
+  border-radius: 4px;
+}

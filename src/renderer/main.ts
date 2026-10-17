@@ -101,6 +101,10 @@ function renderMain(): void {
 
   let termOptions = { fontSize: DEFAULT_SETTINGS.terminal.fontSize, scrollback: DEFAULT_SETTINGS.terminal.scrollback };
   let keymap: Keymap = { ...DEFAULT_KEYMAP };
+  // Auto-explain errors (opt-in, OFF by default). Bound once the AI panel exists — the first
+  // tab's shell starts before then, and a detection must not touch a not-yet-created panel.
+  let autoExplainErrors = DEFAULT_SETTINGS.ai.autoExplainErrors;
+  let onErrorDetected: (recent: string) => boolean = () => false;
 
   const tabs = mountTabs(termHost, api, {
     inputAllowed,
@@ -110,6 +114,7 @@ function renderMain(): void {
       gate.classList.add('pulse');
     },
     terminalOptions: () => termOptions,
+    onErrorDetected: (recent) => onErrorDetected(recent),
   });
   termWrap.prepend(tabs.bar);
 
@@ -152,6 +157,8 @@ function renderMain(): void {
       const v = tabs.active();
       return { selection: v?.getSelectionText() ?? '', viewport: v?.getViewportText() ?? '' };
     });
+  // Only when the user turned it on, and only while content may show (never behind the gate).
+  onErrorDetected = (recent) => autoExplainErrors && inputAllowed() && aiPanel.autoExplain(recent);
   const closeOthers = (keep: string) => {
     if (keep !== 'library' && library.isOpen()) library.toggle();
     if (keep !== 'settings') settingsPanel.close();
@@ -332,6 +339,7 @@ function renderMain(): void {
   };
   const applySettings = (v: SettingsView) => {
     keymap = v.effective.shortcuts;
+    autoExplainErrors = v.effective.ai.autoExplainErrors;
     termOptions = { fontSize: v.effective.terminal.fontSize, scrollback: v.effective.terminal.scrollback };
     tabs.setOptions(termOptions);
     void tabs.refreshProfiles();

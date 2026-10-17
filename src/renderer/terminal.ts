@@ -36,6 +36,8 @@ export interface MountOptions extends TerminalOptions {
   /** Called with the session once the shell is running (again, after a restart). */
   onSession?(s: TermSession): void;
   onExit?(exitCode: number, signal: number | null): void;
+  /** Passive read of each output chunk after it is shown (e.g. error detection). Never alters the shell. */
+  onOutput?(data: string): void;
 }
 
 /**
@@ -104,6 +106,14 @@ export function mountTerminal(container: HTMLElement, api: RendererApi, opts: Mo
       pendingAck += data.length;
       ackTimer ??= window.setTimeout(flushAck, ACK_FLUSH_MS);
     });
+    // Side observer only: a failure here must never affect rendering, acks or the shell.
+    if (opts.onOutput) {
+      try {
+        opts.onOutput(data);
+      } catch {
+        /* ignore */
+      }
+    }
   });
 
   const offExit = api.terminal.onExit((id, exitCode, signal) => {

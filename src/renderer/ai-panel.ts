@@ -10,6 +10,12 @@ export interface AiPanelView {
   close(): void;
   /** Trigger from a button or the shortcut: offers to explain the current selection/viewport. */
   request(getText: () => { selection: string; viewport: string }): void;
+  /**
+   * Auto-explain errors (opt-in): a likely command failure was detected; send `recent` output
+   * straight to the AI. Returns true if it sent; false (and sends nothing) without a key or while
+   * another explanation is running.
+   */
+  autoExplain(recent: string): boolean;
 }
 
 const PREVIEW_HEAD = 8;
@@ -32,6 +38,10 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
   panel.hidden = true;
 
   const statusLine = el('p', { className: 'lib-status' });
+  // Shown while/after an AUTO run so it's always clear the output was sent without a click.
+  const autoNote = el('p', { className: 'ai-auto-note' });
+  autoNote.hidden = true;
+  let autoNoticeShown = false;
   const confirm = el('div', { className: 'ai-confirm' });
   confirm.hidden = true;
   const output = el('pre', { className: 'ai-output' });
@@ -67,8 +77,9 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
   api.ai.onExplainError((m) => endStream(`Error: ${m}`));
   api.ai.onExplainCancelled(() => endStream('Stopped.'));
 
-  async function startStream(text: string): Promise<void> {
-    track(api, 'ai.explain');
+  async function startStream(text: string, source: 'manual' | 'auto' = 'manual'): Promise<void> {
+    track(api, source === 'auto' ? 'ai.autoExplain' : 'ai.explain');
+    autoNote.hidden = source !== 'auto';
     confirm.hidden = true;
     output.textContent = '';
     outputWrap.hidden = false;
@@ -156,9 +167,31 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
     else showConfirm(text);
   }
 
+  function autoExplain(recent: string): boolean {
+    const text = recent.trim();
+    if (!text) return false;
+    // Never pile up or interrupt: a running explanation (manual or auto) wins.
+    if (streaming) return false;
+    open();
+    if (!status?.key.present) {
+      confirm.hidden = true;
+      outputWrap.hidden = true;
+      autoNote.hidden = true;
+      say(`Auto-explain detected an error, but no ${AI_PROVIDER} API key is set — nothing was sent.`);
+      return false;
+    }
+    autoNote.textContent = autoNoticeShown
+      ? `AUTO · explained a detected command error (Auto-explain is on in Settings).`
+      : `AUTO · Auto-explain is ON: when a command error is detected, the recent terminal output (secrets masked) is sent to ${AI_PROVIDER} automatically. Turn it off in Settings → AI assistant.`;
+    autoNoticeShown = true;
+    void startStream(text, 'auto');
+    return true;
+  }
+
   panel.append(
     el('div', { className: 'lib-head' }, el('strong', { text: `Explain with ${AI_PROVIDER}` }), stopButton, button('Close', () => close())),
     statusLine,
+    autoNote,
     message,
     confirm,
     outputWrap,
@@ -172,5 +205,5 @@ export function mountAiPanel(api: RendererApi, opts: { onOpenChange(open: boolea
     opts.onOpenChange(false);
   }
 
-  return { element: panel, isOpen: () => !panel.hidden, close, request };
+  return { element: panel, isOpen: () => !panel.hidden, close, request, autoExplain };
 }

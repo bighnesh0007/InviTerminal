@@ -74,6 +74,17 @@ async function until<T>(what: string, fn: () => T | undefined | false, timeoutMs
   }
 }
 
+/** Like until(), but awaits an async predicate (until() would treat the returned Promise as truthy). */
+async function untilAsync<T>(what: string, fn: () => Promise<T | undefined | false>, timeoutMs: number): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const v = await fn();
+    if (v) return v;
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await sleep(25);
+  }
+}
+
 /**
  * Types into the renderer's own session (as the keyboard would) so output
  * flows through the real IPC → xterm.js → ack path, including flow control.
@@ -634,6 +645,67 @@ export async function aiKeyAutotest(win: BrowserWindow, settingsFile: string, us
 }
 
 /** Phase 7b: the explain flow through the real renderer with the stub model (no network, no key). */
+/**
+ * Auto-explain errors, end to end in the real app (stubbed model, no network):
+ * OFF by default sends nothing; ON auto-sends a detected failure with the AUTO marker; the main
+ * process redacts a planted secret before the model sees it; the shell keeps working normally.
+ */
+export async function autoExplainAutotest(win: BrowserWindow, manager: PtyManager, tap: TerminalTap, controller: ProtectionController): Promise<void> {
+  const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
+  const canary = `gsk_autotest${randomBytes(10).toString('hex')}`;
+  const nonce = randomBytes(3).toString('hex');
+  const out = (id: string) => (tap.output.get(id) ?? []).join('');
+  try {
+    const first = await until('shell', () => tap.spawned[0], 10_000);
+    await until('protection confirmed', () => contentMayShow(controller.get().level) || undefined, 10_000);
+    win.focus();
+    await sleep(400);
+    await js(`window.inviterminal.ai.setKey('gsk_fakeAutoExplain0123456789abcdef')`);
+    await sleep(300);
+
+    // 1) Default OFF: a failing command must NOT open the panel or send anything.
+    const defaultOn = await js<boolean>(`window.inviterminal.settings.get().then((v) => v.effective.ai.autoExplainErrors)`);
+    manager.input(first.sessionId, `frobnicate_off_${nonce}\r`);
+    await until('off: error printed', () => /command not found/.test(out(first.sessionId)) || undefined, 5000);
+    await sleep(1500); // longer than the debounce
+    log('off-by-default', {
+      settingDefault: defaultOn,
+      panelOpened: await js<boolean>(`!document.querySelector('.ai-panel').hidden`),
+      outputText: await js<string>(`document.querySelector('.ai-output').textContent`),
+    });
+
+    // 2) Turn it on, then fail a command whose output also carries a secret-looking token.
+    await js(`window.inviterminal.settings.update({ ai: { autoExplainErrors: true } })`);
+    await sleep(400);
+    manager.input(first.sessionId, `echo ${canary}; frobnicate_on_${nonce}\r`);
+    await untilAsync('on: panel opened', () => js<boolean>(`!document.querySelector('.ai-panel').hidden`).then((v) => v || undefined), 6000);
+    await untilAsync('on: stream done', () => js<string>(`document.querySelector('.ai-panel .lib-message').textContent`).then((t) => t === 'Done.' || t.startsWith('Error') || undefined), 10_000);
+    const output = await js<string>(`document.querySelector('.ai-output').textContent`);
+    log('auto-sent', {
+      autoMarkerVisible: await js<boolean>(`!document.querySelector('.ai-auto-note').hidden`),
+      autoMarkerText: (await js<string>(`document.querySelector('.ai-auto-note').textContent`)).slice(0, 60),
+      confirmSkipped: await js<boolean>(`document.querySelector('.ai-confirm').hidden`),
+      outputHasStub: output.includes('[stub'),
+      outputHasCanary: output.includes(canary),
+      message: await js<string>(`document.querySelector('.ai-panel .lib-message').textContent`),
+    });
+
+    // 3) Cooldown: a second failure right away must not start another explanation.
+    const before = output;
+    manager.input(first.sessionId, `frobnicate_again_${nonce}\r`);
+    await sleep(1500);
+    log('cooldown', { outputUnchanged: (await js<string>(`document.querySelector('.ai-output').textContent`)) === before });
+
+    // 4) Normal execution is untouched: the shell still runs commands and prints their output.
+    manager.input(first.sessionId, `echo still-works-${nonce}\r`);
+    await until('shell still works', () => printedLine(out(first.sessionId), `still-works-${nonce}`) || undefined, 5000).catch(() => undefined);
+    log('shell-unaffected', { printed: printedLine(out(first.sessionId), `still-works-${nonce}`) });
+  } catch (e) {
+    log('error', { message: (e as Error).message });
+  }
+  win.close();
+}
+
 export async function aiExplainAutotest(win: BrowserWindow, manager: PtyManager, tap: TerminalTap, controller: ProtectionController): Promise<void> {
   const js = <T>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true) as Promise<T>;
   const clickIn = (scope: string, text: string) =>
